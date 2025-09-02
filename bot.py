@@ -72,16 +72,51 @@ def init_db():
 # Функция для авторизации и получения листа Google Sheets
 def get_google_sheet():
     try:
-        logger.info("Пытаюсь авторизоваться в Google Sheets...")
-        # Создаем Credentials из строки JSON (а не из файла)
+        logger.info("=== ДИАГНОСТИКА GOOGLE SHEETS ===")
+        logger.info(f"Client email: {credentials_info.get('client_email')}")
+        logger.info(f"SPREADSHEET_ID: {SPREADSHEET_ID}")
+        
+        # Авторизация
         creds = Credentials.from_service_account_info(credentials_info, scopes=SCOPES)
         client = gspread.authorize(creds)
-        logger.info(f"Пытаюсь открыть таблицу с ID: {SPREADSHEET_ID}")
-        sheet = client.open_by_key(SPREADSHEET_ID).worksheet('Тест')
-        logger.info("✅ Успешное подключение к Google Таблице")
-        return sheet
+        
+        # Пробуем получить список ВСЕХ доступных таблиц
+        logger.info("Получаю список всех доступных таблиц...")
+        all_spreadsheets = client.list_spreadsheet_files()
+        
+        if not all_spreadsheets:
+            logger.error("❌ Сервисный аккаунт не видит НИКАКИХ таблиц!")
+            raise PermissionError("No spreadsheets accessible")
+        
+        logger.info(f"Найдено таблиц: {len(all_spreadsheets)}")
+        
+        # Ищем нашу таблицу в списке
+        found = False
+        for spreadsheet in all_spreadsheets:
+            if spreadsheet['id'] == SPREADSHEET_ID:
+                found = True
+                logger.info(f"✅ Наша таблица найдена: {spreadsheet['name']}")
+                break
+        
+        if not found:
+            logger.error("❌ Наша таблица НЕ найдена в доступных")
+            logger.error("Доступные таблицы:")
+            for s in all_spreadsheets[:5]:  # Покажем первые 5
+                logger.error(f"   - {s['name']} (ID: {s['id']})")
+            raise PermissionError("Spreadsheet not found in accessible list")
+        
+        # Если нашли - пробуем открыть
+        logger.info("Пытаюсь открыть таблицу...")
+        spreadsheet = client.open_by_key(SPREADSHEET_ID)
+        logger.info(f"✅ Таблица открыта: {spreadsheet.title}")
+        
+        worksheet = spreadsheet.worksheet('Тест')
+        logger.info(f"✅ Лист 'Тест' найден")
+        
+        return worksheet
+        
     except Exception as e:
-        logger.error(f"❌ Ошибка подключения к Google Таблице: {e}", exc_info=True)
+        logger.error(f"❌ Критическая ошибка в get_google_sheet: {e}", exc_info=True)
         raise
 
 
