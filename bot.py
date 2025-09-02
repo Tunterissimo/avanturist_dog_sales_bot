@@ -93,11 +93,12 @@ def get_google_sheet():
         # Ищем нашу таблицу в списке
         found = False
         for spreadsheet in all_spreadsheets:
-            if spreadsheet['id'] == SPREADSHEET_ID:
+            # Исправлено: обращаемся к элементам списка правильно
+            if spreadsheet['id'] == SPREADSHEET_ID:  # spreadsheet - это словарь, а не список
                 found = True
                 logger.info(f"✅ Наша таблица найдена: {spreadsheet['name']}")
                 break
-        
+
         if not found:
             logger.error("❌ Наша таблица НЕ найдена в доступных")
             logger.error("Доступные таблицы:")
