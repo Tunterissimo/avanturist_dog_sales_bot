@@ -16,7 +16,12 @@ from psycopg2.extras import RealDictCursor
 
 # Настройка логирования
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("bot.log"),  # Логи также будут сохраняться в файл
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -32,7 +37,13 @@ SALES_CHANNELS = ["Сайт", "Инстаграм", "Телеграм", "Озо�
 
 # Функция для подключения к БД
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
+    try:
+        conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+        logger.info("✅ Успешное подключение к БД")
+        return conn
+    except Exception as e:
+        logger.error(f"❌ Ошибка подключения к БД: {e}")
+        raise
 
 
 # Функция для инициализации таблицы в БД (вызывается один раз при старте)
