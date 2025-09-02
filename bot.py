@@ -71,11 +71,18 @@ def init_db():
 
 # Функция для авторизации и получения листа Google Sheets
 def get_google_sheet():
-    # Создаем Credentials из строки JSON (а не из файла)
-    creds = Credentials.from_service_account_info(credentials_info, scopes=SCOPES)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(SPREADSHEET_ID).worksheet("Тест")
-    return sheet
+    try:
+        logger.info("Пытаюсь авторизоваться в Google Sheets...")
+        # Создаем Credentials из строки JSON (а не из файла)
+        creds = Credentials.from_service_account_info(credentials_info, scopes=SCOPES)
+        client = gspread.authorize(creds)
+        logger.info(f"Пытаюсь открыть таблицу с ID: {SPREADSHEET_ID}")
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet('Тест')
+        logger.info("✅ Успешное подключение к Google Таблице")
+        return sheet
+    except Exception as e:
+        logger.error(f"❌ Ошибка подключения к Google Таблице: {e}", exc_info=True)
+        raise
 
 
 # Создаем клавиатуру с каналами продаж
@@ -218,10 +225,18 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         price = float(price.replace(",", "."))
 
         # Записываем в таблицу
+        logger.info("Получаю объект листа...")
         sheet = get_google_sheet()
+
+        logger.info(f"Подготавливаю данные для вставки: {row_data}")
         row_data = [channel, product, quantity, price]
+
+        logger.info("Определяю следующую строку для вставки...")
         next_row = len(sheet.get_all_values()) + 1
+
+        logger.info("Вставляю строку...")
         sheet.insert_row(row_data, next_row)
+        logger.info("✅ Данные успешно вставлены")
 
         # Формируем сообщение об успехе
         success_text = f"""✅ Данные успешно добавлены!
@@ -239,6 +254,7 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Ошибка: 'Количество' и 'Цена' должны быть числами."
         )
     except Exception as e:
+        logger.error(f"❌ Полная ошибка при записи в Google Таблицу: {e}", exc_info=True)
         error_msg = "❌ Произошла ошибка при записи в Google Таблицу."
         await update.message.reply_text(error_msg)
         logger.error(f"Error for user {user_id}: {e}", exc_info=True)
