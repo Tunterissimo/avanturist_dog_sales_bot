@@ -274,12 +274,29 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         row_data = [channel, product, quantity, price]
         logger.info(f"Подготавливаю данные для вставки: {row_data}")
 
-        logger.info("Определяю следующую строку для вставки...")
-        next_row = len(sheet.get_all_values()) + 1
-
-        logger.info("Вставляю строку...")
-        sheet.insert_row(row_data, next_row)
-        logger.info("✅ Данные успешно вставлены")
+        logger.info("Добавляю данные в таблицу...")
+        try:
+            # Просто добавляем строку в конец - Google Sheets сам определит позицию
+            sheet.append_row(row_data)
+            logger.info("✅ Данные успешно добавлены через append_row()")
+            
+        except Exception as append_error:
+            # Если append_row не работает, пробуем альтернативный способ
+            logger.warning(f"append_row не сработал: {append_error}, пробую альтернативный метод...")
+            try:
+                # Получаем все значения и находим первую пустую строку
+                all_values = sheet.get_all_values()
+                next_row = len(all_values) + 1
+                
+                # Вставляем данные напрямую в ячейки
+                for col, value in enumerate(row_data, start=1):
+                    sheet.update_cell(next_row, col, value)
+                    
+                logger.info("✅ Данные успешно добавлены через update_cell()")
+                
+            except Exception as inner_e:
+                logger.error(f"❌ Оба метода не сработали: {inner_e}")
+                raise
 
         # Формируем сообщение об успехе
         success_text = f"""✅ Данные успешно добавлены!
