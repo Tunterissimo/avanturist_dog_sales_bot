@@ -52,15 +52,32 @@ def get_products_from_sheet():
     
     # Обновляем список раз в 5 минут
     if product_list and time.time() - product_last_update < 300:
+        logger.info("✅ Использую кешированный список товаров")
         return product_list
     
     try:
         logger.info("Загружаю список товаров из Google Таблицы...")
         sheet = get_google_sheet_cached()
-        product_sheet = sheet.spreadsheet.worksheet('Продукция')  # Открываем лист "Продукция"
+
+        try:
+            product_sheet = sheet.spreadsheet.worksheet('Продукция')  # Открываем лист "Продукция"
+            logger.info("✅ Лист 'Продукция' найден")
+        except Exception as e:
+            logger.error(f"❌ Лист 'Продукция' не найден: {e}")
+            # Попробуем получить список всех листов
+            all_worksheets = sheet.spreadsheet.worksheets()
+            logger.info(f"Доступные листы: {[ws.title for ws in all_worksheets]}")
+            return []
+        # Читаем данные
+        all_data = product_sheet.get_all_values()
+        logger.info(f"Получено строк с листа 'Продукция': {len(all_data)}")
         
-        # Читаем данные (пропускаем заголовок)
-        products_data = product_sheet.get_all_values()[1:]  
+        if len(all_data) > 0:
+            logger.info(f"Заголовки: {all_data[0]}")
+        
+        # Пропускаем заголовок (первую строку)
+        products_data = all_data[1:] if len(all_data) > 1 else []
+        logger.info(f"Данных товаров (без заголовка): {len(products_data)}")  
         
         # Формируем список товаров
         product_list = []
@@ -72,7 +89,7 @@ def get_products_from_sheet():
                 })
         
         product_last_update = time.time()
-        logger.info(f"✅ Загружено {len(product_list)} товаров")
+        logger.info(f"✅ Загружено {len(product_list)} товаров: {[p['name'] for p in product_list]}")
         return product_list
         
     except Exception as e:
