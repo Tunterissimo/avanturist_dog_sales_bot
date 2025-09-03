@@ -82,10 +82,11 @@ def get_products_from_sheet():
         # Формируем список товаров
         product_list = []
         for row in products_data:
-            if len(row) >= 2 and row[0] and row[1]:  # Проверяем, что есть ID и название
+            if len(row) >= 3 and row[0] and row[1]:  # Проверяем, что есть ID и название
                 product_list.append({
-                    'id': row[0],
-                    'name': row[1]
+                    'id': row[0].strip(),
+                    'name': row[1].strip(),
+                    'price': row[2].strip() if len(row) >= 3 and row[2] else '0'
                 })
         
         product_last_update = time.time()
@@ -95,6 +96,22 @@ def get_products_from_sheet():
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки товаров: {e}")
         return []
+
+def get_product_price(product_id):
+    """Получает цену товара по его ID"""
+    try:
+        products = get_products_from_sheet()
+        product = next((p for p in products if p['id'] == str(product_id)), None)
+        
+        if product and 'price' in product:
+            return float(product['price'])
+        else:
+            logger.error(f"❌ Цена для товара {product_id} не найдена")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения цены: {e}")
+        return None
 
 def products_keyboard():
     """Создает клавиатуру с товарами"""
@@ -182,20 +199,12 @@ def update_db_schema():
         cur.execute("""
             DO $$ 
             BEGIN
-                -- Добавляем product_id если не существует
+                -- Добавляем product_price если не существует
                 IF NOT EXISTS (
                     SELECT 1 FROM information_schema.columns 
-                    WHERE table_name = 'user_states' AND column_name = 'product_id'
+                    WHERE table_name = 'user_states' AND column_name = 'product_price'
                 ) THEN
-                    ALTER TABLE user_states ADD COLUMN product_id VARCHAR(20);
-                END IF;
-                
-                -- Добавляем product_name если не существует
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns 
-                    WHERE table_name = 'user_states' AND column_name = 'product_name'
-                ) THEN
-                    ALTER TABLE user_states ADD COLUMN product_name VARCHAR(100);
+                    ALTER TABLE user_states ADD COLUMN product_price VARCHAR(20);
                 END IF;
             END $$;
         """)
@@ -342,15 +351,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 conn = get_db_connection()
                 cur = conn.cursor()
                 cur.execute(
-                    "UPDATE user_states SET product_id = %s, product_name = %s WHERE user_id = %s",
-                    (selected_product['id'], selected_product['name'], user_id)
+                    "UPDATE user_states SET product_id = %s, product_name = %s, product_price = %s WHERE user_id = %s",
+                    (selected_product['id'], selected_product['name'], selected_product['price'], user_id)
                 )
                 conn.commit()
                 cur.close()
                 conn.close()
                 
                 await query.edit_message_text(text=f"✅ Выбран товар: {selected_product['name']}")
-                await query.message.reply_text("Теперь введите количество и цену через запятую:\n\nПример: `2, 1500`", parse_mode='Markdown')
+                await query.message.reply_text("Теперь введите только количество:\n\nПример: `2`", parse_mode='Markdown')
             else:
                 await query.edit_message_text(text="❌ Товар не найден")
                 await query.message.reply_text("Попробуйте выбрать товар еще раз:", reply_markup=products_keyboard())
@@ -435,7 +444,7 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT channel, product_id, product_name FROM user_states WHERE user_id = %s", (user_id,))
+        cur.execute("SELECT channel, product_id, product_name, product_price FROM user_states WHERE user_id = %s", (user_id,))
         user_state = cur.fetchone()
         cur.close()
         conn.close()
@@ -450,36 +459,25 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         channel = user_state["channel"]
         product_name = user_state["product_name"]
+        product_price = float(user_state["product_price"]) if user_state["product_price"] else 0
 
     except Exception as e:
         logger.error(f"DB error in handle_product_data: {e}")
         await update.message.reply_text("❌ Ошибка сервиса. Попробуйте позже.")
         return
 
-    # Разбиваем сообщение по запятым
-    data = [item.strip() for item in user_message.split(",")]
 
-    # Проверяем, что получили ровно 3 элемента
-    if len(data) != 2:
-        error_text = """Неверный формат данных. Нужно указать 2 значения через запятую:
-*Количество, Цена*
-
-Пример:
-`2, 1500`"""
-        await update.message.reply_text(error_text, parse_mode="Markdown")
-        return
+    # Теперь принимаем ТОЛЬКО количество
 
     try:
         # Извлекаем и проверяем данные
-        quantity, price = data
         quantity = float(quantity.replace(",", "."))
-        price = float(price.replace(",", "."))
 
         # Записываем в таблицу
         logger.info("Получаю объект листа...")
         sheet = get_google_sheet_cached()
 
-        row_data = [channel, product_name, quantity, price]
+        row_data = [channel, product_name, quantity, product_price, quantity * product_price]
         logger.info(f"Подготавливаю данные для вставки: {row_data}")
 
         logger.info("Записываю данные пакетным обновлением...")
