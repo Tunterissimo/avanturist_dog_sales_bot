@@ -44,6 +44,61 @@ def get_google_sheet_cached():
         logger.error(f"❌ Ошибка инициализации Google Sheets: {e}")
         raise
 
+product_list = []
+product_last_update = 0
+
+def get_products_from_sheet():
+    global product_list, product_last_update
+    
+    # Обновляем список раз в 5 минут
+    if product_list and time.time() - product_last_update < 300:
+        return product_list
+    
+    try:
+        logger.info("Загружаю список товаров из Google Таблицы...")
+        sheet = get_google_sheet_cached()
+        product_sheet = sheet.spreadsheet.worksheet('Продукция')  # Открываем лист "Продукция"
+        
+        # Читаем данные (пропускаем заголовок)
+        products_data = product_sheet.get_all_values()[1:]  
+        
+        # Формируем список товаров
+        product_list = []
+        for row in products_data:
+            if len(row) >= 2 and row[0] and row[1]:  # Проверяем, что есть ID и название
+                product_list.append({
+                    'id': row[0],
+                    'name': row[1]
+                })
+        
+        product_last_update = time.time()
+        logger.info(f"✅ Загружено {len(product_list)} товаров")
+        return product_list
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка загрузки товаров: {e}")
+        return []
+
+def products_keyboard():
+    """Создает клавиатуру с товарами"""
+    products = get_products_from_sheet()
+    keyboard = []
+    
+    # Создаем кнопки (по 2 в ряд)
+    for i in range(0, len(products), 2):
+        row = []
+        row.append(InlineKeyboardButton(products[i]['name'], callback_data=f"product_{products[i]['id']}"))
+        
+        if i + 1 < len(products):
+            row.append(InlineKeyboardButton(products[i+1]['name'], callback_data=f"product_{products[i+1]['id']}"))
+        
+        keyboard.append(row)
+    
+    # Добавляем кнопку "Отмена"
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
 # Настройка логирования
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -87,6 +142,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS user_states (
                 user_id BIGINT PRIMARY KEY,
                 channel VARCHAR(50),
+                product_id VARCHAR(20),
+                product_name VARCHAR(100),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """
@@ -219,21 +276,55 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     selected_channel = query.data
+    data = query.data
 
+    await query.answer()
+    
+    if data.startswith("product_"):
+        # Обработка выбора товара
+        product_id = data.split("_")[1]
+        products = get_products_from_sheet()
+        selected_product = next((p for p in products if p['id'] == product_id), None)
+        
+        if selected_product:
+            # Сохраняем выбранный товар в БД
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE user_states SET product_id = %s, product_name = %s WHERE user_id = %s",
+                    (selected_product['id'], selected_product['name'], user_id)
+                )
+                conn.commit()
+                cur.close()
+                conn.close()
+                
+                await query.edit_message_text(text=f"✅ Выбран товар: {selected_product['name']}")
+                await query.message.reply_text("Теперь введите количество и цену через запятую:\n\nПример: `2, 1500`", parse_mode='Markdown')
+                
+            except Exception as e:
+                logger.error(f"DB error in product selection: {e}")
+                await query.message.reply_text("❌ Ошибка сервиса. Попробуйте снова.")
+    
+    elif data == "cancel":
+        # Обработка отмены
+        await query.edit_message_text(text="❌ Операция отменена")
+    
+    else:
     # Сохраняем выбранный канал продаж в БД
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE user_states SET channel = %s WHERE user_id = %s",
-            (selected_channel, user_id),
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        logger.error(f"DB error in button_handler: {e}")
-        await query.answer("❌ Ошибка сохранения. Попробуйте снова.")
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE user_states SET channel = %s WHERE user_id = %s",
+                (selected_channel, user_id),
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.error(f"DB error in button_handler: {e}")
+            await query.answer("❌ Ошибка сохранения. Попробуйте снова.")
         return
 
     # Подтверждаем нажатие кнопки
@@ -272,6 +363,7 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         channel = user_state["channel"]
+        product_name = user_state["product_name"]
 
     except Exception as e:
         logger.error(f"DB error in handle_product_data: {e}")
@@ -282,18 +374,18 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
     data = [item.strip() for item in user_message.split(",")]
 
     # Проверяем, что получили ровно 3 элемента
-    if len(data) != 3:
-        error_text = """Неверный формат данных. Нужно указать 3 значения через запятую:
-*Наименование товара, Количество, Цена*
+    if len(data) != 2:
+        error_text = """Неверный формат данных. Нужно указать 2 значения через запятую:
+*Количество, Цена*
 
 Пример:
-`Ошейник для собаки, 2, 1500`"""
+`2, 1500`"""
         await update.message.reply_text(error_text, parse_mode="Markdown")
         return
 
     try:
         # Извлекаем и проверяем данные
-        product, quantity, price = data
+        quantity, price = data
         quantity = float(quantity.replace(",", "."))
         price = float(price.replace(",", "."))
 
@@ -301,7 +393,7 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.info("Получаю объект листа...")
         sheet = get_google_sheet_cached()
 
-        row_data = [channel, product, quantity, price]
+        row_data = [channel, product_name, quantity, price]
         logger.info(f"Подготавливаю данные для вставки: {row_data}")
 
         logger.info("Записываю данные пакетным обновлением...")
@@ -335,7 +427,7 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Формируем сообщение об успехе
         success_text = f"""✅ Данные успешно добавлены!
 *Канал продаж:* {channel}
-*Товар:* {product}
+*Товар:* {product_name}
 *Количество:* {quantity}
 *Цена:* {price}
 *Сумма:* {quantity * price} руб.
