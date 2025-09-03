@@ -276,27 +276,30 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         logger.info("Добавляю данные в таблицу...")
         try:
-            # Просто добавляем строку в конец - Google Sheets сам определит позицию
-            sheet.append_row(row_data)
-            logger.info("✅ Данные успешно добавлены через append_row()")
+            # Получаем все значения и находим первую действительно пустую строку
+            all_values = sheet.get_all_values()
             
-        except Exception as append_error:
-            # Если append_row не работает, пробуем альтернативный способ
-            logger.warning(f"append_row не сработал: {append_error}, пробую альтернативный метод...")
-            try:
-                # Получаем все значения и находим первую пустую строку
-                all_values = sheet.get_all_values()
+            # Ищем первую строку, где первая ячейка (A) пустая
+            next_row = 2  # Начинаем с строки 2 (после заголовка)
+            for i, row in enumerate(all_values[1:], start=2):  # Пропускаем заголовок
+                if not row or not row[0].strip():  # Если первая ячейка пустая
+                    next_row = i
+                    break
+            else:
+                # Если все строки заполнены, добавляем в конец
                 next_row = len(all_values) + 1
+            
+            logger.info(f"Вставляю данные в строку: {next_row}")
+            
+            # Вставляем данные напрямую в ячейки
+            for col, value in enumerate(row_data, start=1):
+                sheet.update_cell(next_row, col, value)
                 
-                # Вставляем данные напрямую в ячейки
-                for col, value in enumerate(row_data, start=1):
-                    sheet.update_cell(next_row, col, value)
-                    
-                logger.info("✅ Данные успешно добавлены через update_cell()")
-                
-            except Exception as inner_e:
-                logger.error(f"❌ Оба метода не сработали: {inner_e}")
-                raise
+            logger.info("✅ Данные успешно добавлены в правильную строку")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка при вставке: {e}")
+            raise
 
         # Формируем сообщение об успехе
         success_text = f"""✅ Данные успешно добавлены!
