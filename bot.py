@@ -95,30 +95,21 @@ def get_google_sheet():
         
         # Ищем нашу таблицу в списке
         found = False
-        for spreadsheet in all_spreadsheets:
-            # Диагностика каждого элемента
-            logger.info(f"Элемент: {spreadsheet}")
-            logger.info(f"Тип элемента: {type(spreadsheet)}")
-            
-            # Пробуем разные варианты обращения
-            if hasattr(spreadsheet, 'id'):
-                if spreadsheet.id == SPREADSHEET_ID:
-                    found = True
-                    break
-            elif isinstance(spreadsheet, dict) and 'id' in spreadsheet:
-                if spreadsheet['id'] == SPREADSHEET_ID:
-                    found = True
-                    break
-            elif isinstance(spreadsheet, str):
-                if spreadsheet == SPREADSHEET_ID:
-                    found = True
-                    break
+        for spreadsheet_data in all_spreadsheets:
+            # Первый элемент - список с словарем данных таблицы
+            if isinstance(spreadsheet_data, list) and len(spreadsheet_data) > 0:
+                if isinstance(spreadsheet_data[0], dict) and 'id' in spreadsheet_data[0]:
+                    if spreadsheet_data[0]['id'] == SPREADSHEET_ID:
+                        found = True
+                        logger.info(f"✅ Наша таблица найдена: {spreadsheet_data[0]['name']}")
+                        break
+            # Второй элемент - Response object (игнорируем)
+            elif isinstance(spreadsheet_data, Response):
+                logger.info("Игнорируем Response object")
+                continue
 
         if not found:
             logger.error("❌ Наша таблица НЕ найдена в доступных")
-            logger.error("Все доступные таблицы:")
-            for i, s in enumerate(all_spreadsheets):
-                logger.error(f"   {i}. {s} (тип: {type(s)})")
             raise PermissionError("Spreadsheet not found in accessible list")
         
         # Если нашли - пробуем открыть
