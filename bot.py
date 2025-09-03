@@ -89,21 +89,36 @@ def get_google_sheet():
             raise PermissionError("No spreadsheets accessible")
         
         logger.info(f"Найдено таблиц: {len(all_spreadsheets)}")
+        logger.info(f"Тип all_spreadsheets: {type(all_spreadsheets)}")
+        logger.info(f"Первый элемент: {all_spreadsheets[0]}")
+        logger.info(f"Тип первого элемента: {type(all_spreadsheets[0])}")
         
         # Ищем нашу таблицу в списке
         found = False
         for spreadsheet in all_spreadsheets:
-            # Исправлено: обращаемся к элементам списка правильно
-            if spreadsheet['id'] == SPREADSHEET_ID:  # spreadsheet - это словарь, а не список
-                found = True
-                logger.info(f"✅ Наша таблица найдена: {spreadsheet['name']}")
-                break
+            # Диагностика каждого элемента
+            logger.info(f"Элемент: {spreadsheet}")
+            logger.info(f"Тип элемента: {type(spreadsheet)}")
+            
+            # Пробуем разные варианты обращения
+            if hasattr(spreadsheet, 'id'):
+                if spreadsheet.id == SPREADSHEET_ID:
+                    found = True
+                    break
+            elif isinstance(spreadsheet, dict) and 'id' in spreadsheet:
+                if spreadsheet['id'] == SPREADSHEET_ID:
+                    found = True
+                    break
+            elif isinstance(spreadsheet, str):
+                if spreadsheet == SPREADSHEET_ID:
+                    found = True
+                    break
 
         if not found:
             logger.error("❌ Наша таблица НЕ найдена в доступных")
-            logger.error("Доступные таблицы:")
-            for s in all_spreadsheets[:5]:  # Покажем первые 5
-                logger.error(f"   - {s['name']} (ID: {s['id']})")
+            logger.error("Все доступные таблицы:")
+            for i, s in enumerate(all_spreadsheets):
+                logger.error(f"   {i}. {s} (тип: {type(s)})")
             raise PermissionError("Spreadsheet not found in accessible list")
         
         # Если нашли - пробуем открыть
@@ -123,6 +138,7 @@ def get_google_sheet():
 
 # Создаем клавиатуру с каналами продаж
 def sales_channels_keyboard():
+
     keyboard = []
     for i in range(0, len(SALES_CHANNELS), 2):
         row = [
