@@ -276,18 +276,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     data = query.data
-
+    
     await query.answer()
     
+    # 1. Обработка ВЫБОРА ТОВАРА
     if data.startswith("product_"):
-        # Обработка выбора товара
-        product_id = data.split("_")[1]
-        products = get_products_from_sheet()
-        selected_product = next((p for p in products if p['id'] == product_id), None)
-        
-        if selected_product:
-            # Сохраняем выбранный товар в БД
-            try:
+        try:
+            product_id = data.split("_")[1]
+            products = get_products_from_sheet()
+            selected_product = next((p for p in products if p['id'] == product_id), None)
+            
+            if selected_product:
                 conn = get_db_connection()
                 cur = conn.cursor()
                 cur.execute(
@@ -300,46 +299,80 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await query.edit_message_text(text=f"✅ Выбран товар: {selected_product['name']}")
                 await query.message.reply_text("Теперь введите количество и цену через запятую:\n\nПример: `2, 1500`", parse_mode='Markdown')
+            else:
+                await query.edit_message_text(text="❌ Товар не найден")
+                await query.message.reply_text("Попробуйте выбрать товар еще раз:", reply_markup=products_keyboard())
                 
-            except Exception as e:
-                logger.error(f"DB error in product selection: {e}")
-                await query.message.reply_text("❌ Ошибка сервиса. Попробуйте снова.")
+        except Exception as e:
+            logger.error(f"DB error in product selection: {e}")
+            await query.message.reply_text("❌ Ошибка сервиса. Попробуйте снова.")
     
+    # 2. Обработка ОТМЕНЫ
     elif data == "cancel":
-        # Обработка отмены
-        await query.edit_message_text(text="❌ Операция отменена")
+        try:
+            # Очищаем состояние пользователя
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE user_states SET channel = NULL, product_id = NULL, product_name = NULL WHERE user_id = %s",
+                (user_id,)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+            
+            await query.edit_message_text(text="❌ Операция отменена")
+        except Exception as e:
+            logger.error(f"DB error in cancel: {e}")
+            await query.edit_message_text(text="❌ Операция отменена")
     
+    # 3. Обработка ВЫБОРА КАНАЛА ПРОДАЖ
+    elif data in SALES_CHANNELS:
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            # Очищаем предыдущий выбор товара при выборе нового канала
+            cur.execute(
+                "UPDATE user_states SET channel = %s, product_id = NULL, product_name = NULL WHERE user_id = %s",
+                (data, user_id)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+            
+            await query.edit_message_text(text=f"✅ Выбран канал: {data}")
+            
+            # Загружаем товары и показываем клавиатуру
+            products = get_products_from_sheet()
+            if products:
+                await query.message.reply_text(
+                    "Выберите товар:",
+                    reply_markup=products_keyboard()
+                )
+            else:
+                await query.message.reply_text("❌ Нет доступных товаров. Обратитесь к администратору.")
+                
+        except Exception as e:
+            logger.error(f"DB error in channel selection: {e}")
+            await query.answer("❌ Ошибка сохранения. Попробуйте снова.")
+    
+    # 4. Если callback_data не распознан
     else:
-    # Сохраняем выбранный канал продаж в БД
+        logger.warning(f"Неизвестный callback_data: {data}")
+        await query.edit_message_text(text="❌ Неизвестная команда")
+        # Очищаем состояние при неизвестной команде
         try:
             conn = get_db_connection()
             cur = conn.cursor()
             cur.execute(
-                "UPDATE user_states SET channel = %s WHERE user_id = %s",
-                (data, user_id),
+                "UPDATE user_states SET channel = NULL, product_id = NULL, product_name = NULL WHERE user_id = %s",
+                (user_id,)
             )
             conn.commit()
             cur.close()
             conn.close()
         except Exception as e:
-            logger.error(f"DB error in button_handler: {e}")
-            await query.answer("❌ Ошибка сохранения. Попробуйте снова.")
-        return
-
-    # Подтверждаем нажатие кнопки
-    await query.answer()
-    await query.edit_message_text(text=f"✅ Выбран канал: {data}")
-
-    # Просим ввести остальные данные
-    instruction_text = """
-Теперь введите остальные данные через запятую в формате:
-*Наименование товара, Количество, Цена*
-
-Например:
-`Ошейник для собаки, 2, 1500`
-"""
-    await query.message.reply_text(instruction_text, parse_mode="Markdown")
-
+            logger.error(f"DB error cleaning state: {e}")
 
 # Обработчик текстовых сообщений (для данных о товаре)
 async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
