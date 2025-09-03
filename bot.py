@@ -271,8 +271,8 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.info("Получаю объект листа...")
         sheet = get_google_sheet()
 
-        logger.info(f"Подготавливаю данные для вставки: {row_data}")
         row_data = [channel, product, quantity, price]
+        logger.info(f"Подготавливаю данные для вставки: {row_data}")
 
         logger.info("Определяю следующую строку для вставки...")
         next_row = len(sheet.get_all_values()) + 1
