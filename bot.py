@@ -155,6 +155,41 @@ def init_db():
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
 
+def update_db_schema():
+    """Добавляет недостающие колонки в существующую таблицу"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Проверяем существование колонок и добавляем их если нужно
+        cur.execute("""
+            DO $$ 
+            BEGIN
+                -- Добавляем product_id если не существует
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name = 'user_states' AND column_name = 'product_id'
+                ) THEN
+                    ALTER TABLE user_states ADD COLUMN product_id VARCHAR(20);
+                END IF;
+                
+                -- Добавляем product_name если не существует
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name = 'user_states' AND column_name = 'product_name'
+                ) THEN
+                    ALTER TABLE user_states ADD COLUMN product_name VARCHAR(100);
+                END IF;
+            END $$;
+        """)
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("✅ Структура БД успешно обновлена")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка обновления структуры БД: {e}")
 
 # Функция для авторизации и получения листа Google Sheets
 def get_google_sheet():
@@ -481,6 +516,8 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
 if __name__ == "__main__":
     # Инициализируем базу данных при старте
     init_db()
+    # ОБНОВЛЯЕМ СТРУКТУРУ БД ← добавляем эту строку!
+    update_db_schema()
 
     # Парсим JSON credentials из переменной окружения
     import json
