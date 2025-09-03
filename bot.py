@@ -275,7 +275,6 @@ async def add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
-    selected_channel = query.data
     data = query.data
 
     await query.answer()
@@ -317,7 +316,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cur = conn.cursor()
             cur.execute(
                 "UPDATE user_states SET channel = %s WHERE user_id = %s",
-                (selected_channel, user_id),
+                (data, user_id),
             )
             conn.commit()
             cur.close()
@@ -329,7 +328,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Подтверждаем нажатие кнопки
     await query.answer()
-    await query.edit_message_text(text=f"✅ Выбран канал: {selected_channel}")
+    await query.edit_message_text(text=f"✅ Выбран канал: {data}")
 
     # Просим ввести остальные данные
     instruction_text = """
