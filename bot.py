@@ -430,20 +430,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     user_id = update.message.from_user.id
-
+    
     # Достаем состояние пользователя из БД
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT channel FROM user_states WHERE user_id = %s", (user_id,))
+        cur.execute("SELECT channel, product_id, product_name FROM user_states WHERE user_id = %s", (user_id,))
         user_state = cur.fetchone()
         cur.close()
         conn.close()
 
         if not user_state or not user_state["channel"]:
-            await update.message.reply_text(
-                "❌ Сначала выберите канал продаж с помощью команды /add"
-            )
+            await update.message.reply_text("❌ Сначала выберите канал продаж через команду /add")
+            return
+            
+        if not user_state["product_name"]:
+            await update.message.reply_text("❌ Сначала выберите товар через команду /add")
             return
 
         channel = user_state["channel"]
