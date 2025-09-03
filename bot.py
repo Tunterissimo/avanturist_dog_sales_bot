@@ -471,7 +471,12 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         # Извлекаем и проверяем данные
-        quantity = float(quantity.replace(",", "."))
+        quantity_input = user_message.strip()
+        quantity = float(quantity_input.replace(",", "."))
+
+        if quantity <= 0:
+            await update.message.reply_text("❌ Количество должно быть больше 0")
+            return
 
         # Записываем в таблицу
         logger.info("Получаю объект листа...")
@@ -480,6 +485,7 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         row_data = [channel, product_name, quantity, product_price, quantity * product_price]
         logger.info(f"Подготавливаю данные для вставки: {row_data}")
 
+        # Пакетное обновление
         logger.info("Записываю данные пакетным обновлением...")
         try:
             # Получаем только первый столбец для поиска пустой строки
@@ -513,15 +519,15 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
 *Канал продаж:* {channel}
 *Товар:* {product_name}
 *Количество:* {quantity}
-*Цена:* {price}
-*Сумма:* {quantity * price} руб.
+*Цена:* {product_price}
+*Сумма:* {quantity * product_price} руб.
 """
         await update.message.reply_text(success_text, parse_mode="Markdown")
         logger.info(f"User {user_id} added record: {row_data}")
 
     except ValueError:
         await update.message.reply_text(
-            "Ошибка: 'Количество' и 'Цена' должны быть числами."
+            "❌ Ошибка: количество должно быть числом. Пример: `2`"
         )
     except Exception as e:
         logger.error(f"❌ Полная ошибка при записи в Google Таблицу: {e}", exc_info=True)
