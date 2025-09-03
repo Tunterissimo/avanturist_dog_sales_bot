@@ -1,3 +1,4 @@
+import time 
 import logging
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,6 +14,35 @@ import gspread
 from google.oauth2.service_account import Credentials
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
+gsheet_client = None
+gsheet_worksheet = None
+gsheet_last_init = 0
+
+def get_google_sheet_cached():
+    global gsheet_client, gsheet_worksheet, gsheet_last_init
+    
+    # Переиспользуем подключение в течение 5 минут
+    if (gsheet_client is not None and gsheet_worksheet is not None and 
+        time.time() - gsheet_last_init < 300):  # 300 секунд = 5 минут
+        logger.info("✅ Использую кешированное подключение к Google Sheets")
+        return gsheet_worksheet
+    
+    # Инициализируем новое подключение
+    try:
+        logger.info("Инициализирую новое подключение к Google Sheets...")
+        creds = Credentials.from_service_account_info(credentials_info, scopes=SCOPES)
+        gsheet_client = gspread.authorize(creds)
+        spreadsheet = gsheet_client.open_by_key(SPREADSHEET_ID)
+        gsheet_worksheet = spreadsheet.worksheet('Тест')
+        gsheet_last_init = time.time()
+        
+        logger.info("✅ Новое подключение к Google Sheets установлено")
+        return gsheet_worksheet
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка инициализации Google Sheets: {e}")
+        raise
 
 # Настройка логирования
 logging.basicConfig(
@@ -269,36 +299,36 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         # Записываем в таблицу
         logger.info("Получаю объект листа...")
-        sheet = get_google_sheet()
+        sheet = get_google_sheet_cached()
 
         row_data = [channel, product, quantity, price]
         logger.info(f"Подготавливаю данные для вставки: {row_data}")
 
-        logger.info("Добавляю данные в таблицу...")
+        logger.info("Ищу первую пустую строку...")
         try:
-            # Получаем все значения и находим первую действительно пустую строку
-            all_values = sheet.get_all_values()
+            # Более быстрый способ: получаем только первый столбец
+            col_a_values = sheet.col_values(1)  # Только значения столбца A
             
-            # Ищем первую строку, где первая ячейка (A) пустая
-            next_row = 2  # Начинаем с строки 2 (после заголовка)
-            for i, row in enumerate(all_values[1:], start=2):  # Пропускаем заголовок
-                if not row or not row[0].strip():  # Если первая ячейка пустая
+            # Пропускаем заголовок (строка 1) и ищем первую пустую ячейку
+            next_row = 2
+            for i, value in enumerate(col_a_values[1:], start=2):  # Начинаем с индекса 2
+                if not value.strip():  # Если ячейка пустая
                     next_row = i
                     break
             else:
-                # Если все строки заполнены, добавляем в конец
-                next_row = len(all_values) + 1
+                # Если все заполнено, добавляем в конец
+                next_row = len(col_a_values) + 1
             
-            logger.info(f"Вставляю данные в строку: {next_row}")
+            logger.info(f"Найдена пустая строка: {next_row}")
             
-            # Вставляем данные напрямую в ячейки
+            # Записываем данные
             for col, value in enumerate(row_data, start=1):
                 sheet.update_cell(next_row, col, value)
                 
-            logger.info("✅ Данные успешно добавлены в правильную строку")
+            logger.info("✅ Данные записаны")
             
         except Exception as e:
-            logger.error(f"❌ Ошибка при вставке: {e}")
+            logger.error(f"❌ Ошибка при поиске строки: {e}")
             raise
 
         # Формируем сообщение об успехе
