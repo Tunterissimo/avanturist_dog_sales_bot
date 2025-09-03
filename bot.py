@@ -304,31 +304,32 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         row_data = [channel, product, quantity, price]
         logger.info(f"Подготавливаю данные для вставки: {row_data}")
 
-        logger.info("Ищу первую пустую строку...")
+        logger.info("Записываю данные пакетным обновлением...")
         try:
-            # Более быстрый способ: получаем только первый столбец
-            col_a_values = sheet.col_values(1)  # Только значения столбца A
+            # Получаем только первый столбец для поиска пустой строки
+            col_a_values = sheet.col_values(1)
             
-            # Пропускаем заголовок (строка 1) и ищем первую пустую ячейку
             next_row = 2
-            for i, value in enumerate(col_a_values[1:], start=2):  # Начинаем с индекса 2
-                if not value.strip():  # Если ячейка пустая
+            for i, value in enumerate(col_a_values[1:], start=2):
+                if not value.strip():
                     next_row = i
                     break
             else:
-                # Если все заполнено, добавляем в конец
                 next_row = len(col_a_values) + 1
             
-            logger.info(f"Найдена пустая строка: {next_row}")
-            
-            # Записываем данные
+            # Пакетное обновление - ВМЕСТО цикла с update_cell
+            batch_data = []
             for col, value in enumerate(row_data, start=1):
-                sheet.update_cell(next_row, col, value)
-                
-            logger.info("✅ Данные записаны")
+                batch_data.append({
+                    'range': f"{chr(64+col)}{next_row}",  # A2, B2, C2, etc.
+                    'values': [[value]]
+                })
+            
+            sheet.batch_update(batch_data)
+            logger.info(f"✅ Пакетная запись завершена в строку {next_row}")
             
         except Exception as e:
-            logger.error(f"❌ Ошибка при поиске строки: {e}")
+            logger.error(f"❌ Ошибка пакетной записи: {e}")
             raise
 
         # Формируем сообщение об успехе
