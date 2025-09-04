@@ -153,7 +153,6 @@ CREDENTIALS_JSON = os.environ["CREDENTIALS"]
 # Список каналов продаж
 SALES_CHANNELS = ["Сайт", "Инстаграм", "Телеграм", "Озон", "Маркеты"]
 
-
 # Функция для подключения к БД
 def get_db_connection():
     try:
@@ -163,7 +162,6 @@ def get_db_connection():
     except Exception as e:
         logger.error(f"❌ Ошибка подключения к БД: {e}")
         raise
-
 
 # Функция для инициализации таблицы в БД (вызывается один раз при старте)
 def init_db():
@@ -189,6 +187,7 @@ def init_db():
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
 
+# Функция обновления таблиц в БД
 def update_db_schema():
     """Добавляет недостающие колонки в существующую таблицу"""
     try:
@@ -274,7 +273,6 @@ def get_google_sheet():
         logger.error(f"❌ Критическая ошибка в get_google_sheet: {e}", exc_info=True)
         raise
 
-
 # Создаем клавиатуру с каналами продаж
 def sales_channels_keyboard():
 
@@ -294,6 +292,164 @@ def sales_channels_keyboard():
         keyboard.append(row)
     return InlineKeyboardMarkup(keyboard)
 
+# Функция генерации отчета
+async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    
+    try:
+        # Показываем клавиатуру с вариантами отчетов
+        keyboard = [
+            [InlineKeyboardButton("📊 Отчет по каналам продаж", callback_data="report_channels")],
+            [InlineKeyboardButton("📦 Отчет по товарам", callback_data="report_products")],
+            [InlineKeyboardButton("📅 Отчет за период", callback_data="report_period")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="report_cancel")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "📈 Выберите тип отчета:",
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка в generate_report: {e}")
+        await update.message.reply_text("❌ Ошибка генерации отчета")
+
+async def handle_report_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    data = query.data
+    
+    await query.answer()
+    
+    if data == "report_channels":
+        await generate_channels_report(query)
+    elif data == "report_products":
+        await generate_products_report(query)
+    elif data == "report_period":
+        await query.edit_message_text("📅 Введите период в формате: ДД.ММ.ГГГГ-ДД.ММ.ГГГГ\n\nПример: 01.09.2025-03.09.2025")
+    elif data == "report_cancel":
+        await query.edit_message_text("❌ Генерация отчета отменена")
+
+# Функция отчета по каналам продаж
+async def generate_channels_report(query):
+    try:
+        sheet = get_google_sheet_cached()
+        
+        # Получаем все данные из листа
+        all_data = sheet.get_all_values()
+        
+        if len(all_data) <= 1:  # Только заголовок
+            await query.edit_message_text("📊 Нет данных для отчета")
+            return
+        
+        # Парсим данные (пропускаем заголовок)
+        sales_data = []
+        for row in all_data[1:]:
+            if len(row) >= 5 and row[0] and row[2] and row[3] and row[4]:  # Проверяем обязательные поля
+                try:
+                    sales_data.append({
+                        'channel': row[0],
+                        'product': row[1],
+                        'quantity': float(row[2].replace(',', '.')),
+                        'price': float(row[3].replace(',', '.')),
+                        'amount': float(row[4].replace(',', '.'))
+                    })
+                except ValueError:
+                    continue
+        
+        if not sales_data:
+            await query.edit_message_text("📊 Нет данных для анализа")
+            return
+        
+        # Анализируем данные по каналам
+        channel_stats = {}
+        for sale in sales_data:
+            channel = sale['channel']
+            if channel not in channel_stats:
+                channel_stats[channel] = {
+                    'count': 0,
+                    'total_amount': 0,
+                    'total_quantity': 0
+                }
+            
+            channel_stats[channel]['count'] += 1
+            channel_stats[channel]['total_amount'] += sale['amount']
+            channel_stats[channel]['total_quantity'] += sale['quantity']
+        
+        # Формируем отчет
+        report_text = "📊 ОТЧЕТ ПО КАНАЛАМ ПРОДАЖ\n\n"
+        report_text += "Канал | Продажи | Количество | Сумма\n"
+        report_text += "------------------------------------\n"
+        
+        total_amount = 0
+        total_quantity = 0
+        
+        for channel, stats in channel_stats.items():
+            report_text += f"{channel} | {stats['count']} | {stats['total_quantity']} | {stats['total_amount']:,.2f} руб.\n"
+            total_amount += stats['total_amount']
+            total_quantity += stats['total_quantity']
+        
+        report_text += "------------------------------------\n"
+        report_text += f"ИТОГО | {len(sales_data)} | {total_quantity} | {total_amount:,.2f} руб."
+        
+        # Отправляем отчет
+        await query.edit_message_text(report_text)
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка генерации отчета: {e}")
+        await query.edit_message_text("❌ Ошибка генерации отчета")
+
+# Функция отчета по товарам
+async def generate_products_report(query):
+    try:
+        sheet = get_google_sheet_cached()
+        all_data = sheet.get_all_values()
+        
+        if len(all_data) <= 1:
+            await query.edit_message_text("📦 Нет данных для отчета")
+            return
+        
+        # Анализируем данные по товарам
+        product_stats = {}
+        for row in all_data[1:]:
+            if len(row) >= 5 and row[1] and row[2] and row[4]:
+                try:
+                    product = row[1]
+                    quantity = float(row[2].replace(',', '.'))
+                    amount = float(row[4].replace(',', '.'))
+                    
+                    if product not in product_stats:
+                        product_stats[product] = {
+                            'count': 0,
+                            'total_amount': 0,
+                            'total_quantity': 0
+                        }
+                    
+                    product_stats[product]['count'] += 1
+                    product_stats[product]['total_amount'] += amount
+                    product_stats[product]['total_quantity'] += quantity
+                    
+                except ValueError:
+                    continue
+        
+        if not product_stats:
+            await query.edit_message_text("📦 Нет данных для анализа")
+            return
+        
+        # Формируем отчет
+        report_text = "📦 ОТЧЕТ ПО ТОВАРАМ\n\n"
+        report_text += "Товар | Продажи | Количество | Сумма\n"
+        report_text += "------------------------------------\n"
+        
+        for product, stats in product_stats.items():
+            report_text += f"{product} | {stats['count']} | {stats['total_quantity']} | {stats['total_amount']:,.2f} руб.\n"
+        
+        await query.edit_message_text(report_text)
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка генерации отчета по товарам: {e}")
+        await query.edit_message_text("❌ Ошибка генерации отчета")
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -304,7 +460,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Чтобы добавить новую запись, используй команду /add
 """
     await update.message.reply_text(help_text, parse_mode="Markdown")
-
 
 # Обработчик команды /add
 async def add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -331,6 +486,7 @@ async def add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Выберите канал продаж:", reply_markup=sales_channels_keyboard()
     )
 
+# Обработчик команды /report
 
 # Обработчик нажатий на кнопки каналов продаж
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -557,6 +713,7 @@ if __name__ == "__main__":
     # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("add", add_entry))
+    application.add_handler(CommandHandler("report", generate_report))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_product_data)
