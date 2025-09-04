@@ -40,7 +40,7 @@ PRODUCT_SHEET_NAME = 'Продукция'
 SALES_CHANNELS = ["Сайт", "Инстаграм", "Телеграм", "Озон", "Маркеты"]
 
 # Ожидаемые заголовки колонок в таблице продаж
-EXPECTED_HEADERS = ["Канал продаж", "Наименование товара", "Количество", "Цена", "Сумма", "Дата"]
+EXPECTED_HEADERS = ["Канал продаж", "Наименование товара", "Количество", "Цена", "Сумма"]
 
 # ==================== НАСТРОЙКА ЛОГГИРОВАНИЯ ====================
 logging.basicConfig(
@@ -450,8 +450,8 @@ async def generate_channels_report(query):
         # Находим индексы колонок по заголовкам
         headers = all_data[0]
         try:
-            channel_idx = headers.index("Канал")
-            product_idx = headers.index("Товар")
+            channel_idx = headers.index("Канал продаж")
+            product_idx = headers.index("Наименование товара")
             qty_idx = headers.index("Количество")
             price_idx = headers.index("Цена")
             amount_idx = headers.index("Сумма")
