@@ -536,7 +536,7 @@ async def generate_products_report(query):
         # Находим индексы колонок по заголовкам
         headers = all_data[0]
         try:
-            product_idx = headers.index("Товар")
+            product_idx = headers.index("Наименование товара")
             qty_idx = headers.index("Количество")
             amount_idx = headers.index("Сумма")
         except ValueError as e:
