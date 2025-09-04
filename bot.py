@@ -714,7 +714,8 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("add", add_entry))
     application.add_handler(CommandHandler("report", generate_report))
-    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(CallbackQueryHandler(button_handler, pattern="^(product_|cancel|Сайт|Инстаграм|Телеграм|Озон|Маркеты)"))
+    application.add_handler(CallbackQueryHandler(handle_report_buttons, pattern="^report_"))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_product_data)
     )
