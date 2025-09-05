@@ -375,7 +375,7 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         next_row = len(all_data) + 1  # Следующая после последней заполненной
 
         # Подготавливаем данные для вставки
-        row_data = [channel, product_name, quantity, product_price, quantity * product_price, datetime.now()]
+        row_data = [channel, product_name, quantity, product_price, quantity * product_price, f"'{datetime.now().strftime('%d.%m.%Y')}"]
         
         # Вставляем данные
         sheet.append_row(row_data)
