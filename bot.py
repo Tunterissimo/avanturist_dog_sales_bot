@@ -33,8 +33,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-SHEET_NAME = 'Тест'
+SHEET_NAME = 'Продажи'
 PRODUCT_SHEET_NAME = 'Продукция'
+CHANNELS_SHEET_NAME = 'Каналы'
 
 # Список каналов продаж
 SALES_CHANNELS = ["Сайт", "Инстаграм", "Телеграм", "Озон", "Маркеты"]
@@ -166,6 +167,43 @@ def get_products_from_sheet():
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки товаров: {e}")
         return []
+    
+@lru_cache(maxsize=1)
+def get_channels_from_sheet():
+    """Загружает список каналов продаж из Google Таблицы с кешированием"""
+    try:
+        logger.info("🔄 Загружаю список каналов из Google Таблицы...")
+        sheet = get_google_sheet_cached()
+
+        try:
+            channels_sheet = sheet.spreadsheet.worksheet(CHANNELS_SHEET_NAME)
+            logger.info("✅ Лист 'Каналы' найден")
+        except Exception as e:
+            logger.error(f"❌ Лист 'Каналы' не найден: {e}")
+            return SALES_CHANNELS  # Возвращаем статический список как fallback
+
+        all_data = channels_sheet.get_all_values()
+        logger.info(f"📊 Получено строк с листа 'Каналы': {len(all_data)}")
+
+        # Пропускаем заголовок
+        channels_data = all_data[1:] if len(all_data) > 1 else []
+        
+        # Формируем список каналов
+        channels_list = []
+        for row in channels_data:
+            if len(row) >= 2 and row[0] and row[1]:
+                channels_list.append(row[1].strip())
+        
+        logger.info(f"✅ Загружено {len(channels_list)} каналов: {channels_list}")
+        if channels_list:
+            return channels_list
+        else:
+            logger.warning("⚠️ Список каналов пуст, использую fallback")
+            return SALES_CHANNELS
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка загрузки каналов: {e}")
+        return SALES_CHANNELS  # Fallback на статический список
 
 def get_product_price(product_id):
     """Получает цену товара по его ID"""
@@ -208,18 +246,33 @@ def products_keyboard():
         return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]])
 
 def sales_channels_keyboard():
-    """Создает клавиатуру с каналами продаж"""
-    keyboard = []
-    for i in range(0, len(SALES_CHANNELS), 2):
-        row = [
-            InlineKeyboardButton(SALES_CHANNELS[i], callback_data=SALES_CHANNELS[i]),
-            InlineKeyboardButton(SALES_CHANNELS[i + 1], callback_data=SALES_CHANNELS[i + 1])
-            if i + 1 < len(SALES_CHANNELS)
-            else None,
-        ]
-        row = [btn for btn in row if btn is not None]
-        keyboard.append(row)
-    return InlineKeyboardMarkup(keyboard)
+    """Создает клавиатуру с каналами продаж из Google Таблицы"""
+    try:
+        channels = get_channels_from_sheet()
+        keyboard = []
+        
+        # Создаем кнопки (по 2 в ряд)
+        for i in range(0, len(channels), 2):
+            row = []
+            row.append(InlineKeyboardButton(channels[i], callback_data=channels[i]))
+            
+            if i + 1 < len(channels):
+                row.append(InlineKeyboardButton(channels[i+1], callback_data=channels[i+1]))
+            
+            keyboard.append(row)
+        
+        # Добавляем кнопку "Отмена"
+        keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
+        
+        return InlineKeyboardMarkup(keyboard)
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания клавиатуры каналов: {e}")
+        # Используем статические каналы как резерв
+        keyboard = []
+        for channel in SALES_CHANNELS:
+            keyboard.append([InlineKeyboardButton(channel, callback_data=channel)])
+        keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
+        return InlineKeyboardMarkup(keyboard)
 
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -301,7 +354,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text="❌ Операция отменена")
     
     # 3. Обработка ВЫБОРА КАНАЛА ПРОДАЖ
-    elif data in SALES_CHANNELS:
+    elif data in get_channels_from_sheet():  # Проверяем оба списка
         try:
             with get_db_cursor() as cur:
                 cur.execute(
@@ -311,7 +364,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await query.edit_message_text(text=f"✅ Выбран канал: {data}")
             
-            # Загружаем товары и показываем клавиатуру
+    # Загружаем товары и показываем клавиатуру
             try:
                 products = get_products_from_sheet()
                 if products:
@@ -324,7 +377,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"❌ Не удалось загрузить товары: {e}")
                 await query.message.reply_text("❌ Не удалось загрузить каталог товаров. Попробуйте позже.")
-                
+            
         except Exception as e:
             logger.error(f"❌ Ошибка БД при выборе канала: {e}")
             await query.answer("❌ Ошибка сохранения. Попробуйте снова.")
@@ -513,6 +566,12 @@ async def generate_channels_report(query):
         channel_stats = {}
         for sale in sales_data:
             channel = sale['channel']
+        # Проверяем, что канал есть в актуальном списке
+            available_channels = get_channels_from_sheet()
+            if channel not in available_channels:
+                logger.warning(f"⚠️ Неизвестный канал в данных: {channel}")
+                continue
+            
             if channel not in channel_stats:
                 channel_stats[channel] = {
                     'count': 0,
