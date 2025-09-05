@@ -40,7 +40,7 @@ PRODUCT_SHEET_NAME = 'Продукция'
 SALES_CHANNELS = ["Сайт", "Инстаграм", "Телеграм", "Озон", "Маркеты"]
 
 # Ожидаемые заголовки колонок в таблице продаж
-EXPECTED_HEADERS = ["Канал продаж", "Наименование товара", "Количество", "Цена", "Сумма"]
+EXPECTED_HEADERS = ["Канал продаж", "Наименование товара", "Количество", "Цена", "Сумма", "Дата"]
 
 # ==================== НАСТРОЙКА ЛОГГИРОВАНИЯ ====================
 logging.basicConfig(
@@ -375,7 +375,7 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         next_row = len(all_data) + 1  # Следующая после последней заполненной
 
         # Подготавливаем данные для вставки
-        row_data = [channel, product_name, quantity, product_price, quantity * product_price, datetime.now().strftime("%Y-%m-%d")]
+        row_data = [channel, product_name, quantity, product_price, quantity * product_price, datetime.now().strftime("%d.%m.%Y")]
         
         # Вставляем данные
         sheet.append_row(row_data)
@@ -463,12 +463,13 @@ async def generate_channels_report(query):
         # Парсим данные
         sales_data = []
         for row in all_data[1:]:
-            # Пропускаем пустые строки
-            if not any(row):
+        # Пропускаем пустые строки
+            if not any(row) or len(row) < 6:  # Проверяем, что есть все 6 колонок
                 continue
                 
-            if len(row) > max(channel_idx, product_idx, qty_idx, amount_idx) and row[channel_idx] and row[qty_idx] and row[amount_idx]:
-                try:
+            try:
+        # Проверяем, что основные поля не пустые
+                if row[channel_idx] and row[qty_idx] and row[amount_idx]:
                     sales_data.append({
                         'channel': row[channel_idx],
                         'product': row[product_idx] if len(row) > product_idx else '',
@@ -476,8 +477,9 @@ async def generate_channels_report(query):
                         'price': float(row[price_idx].replace(',', '.')) if len(row) > price_idx and row[price_idx] else 0,
                         'amount': float(row[amount_idx].replace(',', '.'))
                     })
-                except ValueError:
-                    continue
+            except (ValueError, IndexError):
+                logger.warning(f"Пропущена строка из-за ошибки формата: {row}")
+                continue
         
         if not sales_data:
             await query.edit_message_text("📊 Нет данных для анализа")
