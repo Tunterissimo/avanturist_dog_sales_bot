@@ -42,6 +42,15 @@ SALES_CHANNELS = ["Сайт", "Инстаграм", "Телеграм", "Озо�
 # Ожидаемые заголовки колонок в таблице продаж
 EXPECTED_HEADERS = ["Канал продаж", "Наименование товара", "Количество", "Цена", "Сумма", "Дата"]
 
+# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+def clean_numeric_value(value):
+    """Очищает числовое значение от символов валюты и пробелов"""
+    if not value:
+        return "0"
+    # Удаляем 'р.', пробелы и неразрывные пробелы
+    cleaned = value.replace('р.', '').replace(' ', '').replace('\xa0', '').replace(',', '.')
+    return cleaned.strip()
+
 # ==================== НАСТРОЙКА ЛОГГИРОВАНИЯ ====================
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -375,7 +384,14 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         next_row = len(all_data) + 1  # Следующая после последней заполненной
 
         # Подготавливаем данные для вставки
-        row_data = [channel, product_name, quantity, product_price, quantity * product_price, datetime.now().strftime("%d.%m.%Y")]
+        row_data = [
+            channel, 
+            product_name, 
+            str(quantity),  # Просто число без форматирования
+            str(product_price),  # Просто число без форматирования
+            str(quantity * product_price),  # Просто число без форматирования
+            datetime.now().strftime("%d.%m.%Y")
+        ]
         
         # Вставляем данные
         sheet.append_row(row_data)
@@ -443,6 +459,11 @@ async def generate_channels_report(query):
         sheet = get_google_sheet_cached()
         all_data = sheet.get_all_values()
         
+        logger.info(f"Заголовки таблицы: {headers}")
+        logger.info(f"Всего строк данных: {len(all_data) - 1}")
+        if len(all_data) > 1:
+            logger.info(f"Первые 3 строки данных: {all_data[1:4]}")
+
         if len(all_data) <= 1:
             await query.edit_message_text("📊 Нет данных для отчета")
             return
@@ -468,17 +489,20 @@ async def generate_channels_report(query):
                 continue
                 
             try:
-        # Проверяем, что основные поля не пустые
-                if row[channel_idx] and row[qty_idx] and row[amount_idx]:
-                    sales_data.append({
-                        'channel': row[channel_idx],
-                        'product': row[product_idx] if len(row) > product_idx else '',
-                        'quantity': float(row[qty_idx].replace(',', '.')),
-                        'price': float(row[price_idx].replace(',', '.')) if len(row) > price_idx and row[price_idx] else 0,
-                        'amount': float(row[amount_idx].replace(',', '.'))
-                    })
-            except (ValueError, IndexError):
-                logger.warning(f"Пропущена строка из-за ошибки формата: {row}")
+        # Очищаем числовые значения
+                cleaned_qty = clean_numeric_value(row[qty_idx])
+                cleaned_amount = clean_numeric_value(row[amount_idx])
+                cleaned_price = clean_numeric_value(row[price_idx]) if len(row) > price_idx and row[price_idx] else "0"
+                
+                sales_data.append({
+                    'channel': row[channel_idx],
+                    'product': row[product_idx] if len(row) > product_idx else '',
+                    'quantity': float(cleaned_qty),
+                    'price': float(cleaned_price),
+                    'amount': float(cleaned_amount)
+                })
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Пропущена строка из-за ошибки формата: {row}. Ошибка: {e}")
                 continue
         
         if not sales_data:
@@ -531,6 +555,9 @@ async def generate_products_report(query):
         sheet = get_google_sheet_cached()
         all_data = sheet.get_all_values()
         
+        logger.info(f"Заголовки таблицы: {headers}")
+        logger.info(f"Всего строк данных: {len(all_data) - 1}")
+
         if len(all_data) <= 1:
             await query.edit_message_text("📦 Нет данных для отчета")
             return
@@ -549,29 +576,33 @@ async def generate_products_report(query):
         # Анализируем данные по товарам
         product_stats = {}
         for row in all_data[1:]:
-            # Пропускаем пустые строки
-            if not any(row):
+        # Пропускаем пустые строки
+            if not any(row) or len(row) < 6:
                 continue
                 
-            if len(row) > max(product_idx, qty_idx, amount_idx) and row[product_idx] and row[qty_idx] and row[amount_idx]:
-                try:
-                    product = row[product_idx]
-                    quantity = float(row[qty_idx].replace(',', '.'))
-                    amount = float(row[amount_idx].replace(',', '.'))
-                    
-                    if product not in product_stats:
-                        product_stats[product] = {
-                            'count': 0,
-                            'total_amount': 0,
-                            'total_quantity': 0
-                        }
-                    
-                    product_stats[product]['count'] += 1
-                    product_stats[product]['total_amount'] += amount
-                    product_stats[product]['total_quantity'] += quantity
-                    
-                except ValueError:
-                    continue
+            try:
+        # Очищаем числовые значения
+                cleaned_qty = clean_numeric_value(row[qty_idx])
+                cleaned_amount = clean_numeric_value(row[amount_idx])
+                
+                product = row[product_idx]
+                quantity = float(cleaned_qty)
+                amount = float(cleaned_amount)
+                
+                if product not in product_stats:
+                    product_stats[product] = {
+                        'count': 0,
+                        'total_amount': 0,
+                        'total_quantity': 0
+                    }
+                
+                product_stats[product]['count'] += 1
+                product_stats[product]['total_amount'] += amount
+                product_stats[product]['total_quantity'] += quantity
+                
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Пропущена строка из-за ошибки формата: {row}. Ошибка: {e}")
+                continue
         
         if not product_stats:
             await query.edit_message_text("📦 Нет данных для анализа")
