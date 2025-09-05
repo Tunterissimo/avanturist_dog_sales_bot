@@ -48,7 +48,12 @@ def clean_numeric_value(value):
     """Очищает числовое значение от символов валюты и пробелов"""
     if not value:
         return "0"
-    # Удаляем 'р.', пробелы и неразрывные пробелы
+    
+    # Если значение уже чистое число (новый формат)
+    if isinstance(value, (int, float)):
+        return str(value)
+    
+    # Если значение строка со старым форматом
     cleaned = value.replace('р.', '').replace(' ', '').replace('\xa0', '').replace(',', '.')
     return cleaned.strip()
 
@@ -440,9 +445,9 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         row_data = [
             channel, 
             product_name, 
-            str(quantity),  # Просто число без форматирования
-            str(product_price),  # Просто число без форматирования
-            str(quantity * product_price),  # Просто число без форматирования
+            quantity,  # Число как есть
+            f"р. {product_price:,.2f}".replace(',', '\xa0'),  # Форматированная цена
+            f"р. {quantity * product_price:,.2f}".replace(',', '\xa0'),  # Форматированная сумма
             datetime.now().strftime("%d.%m.%Y")
         ]
         
