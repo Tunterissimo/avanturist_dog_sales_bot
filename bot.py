@@ -459,8 +459,7 @@ async def generate_channels_report(query):
         sheet = get_google_sheet_cached()
         all_data = sheet.get_all_values()
         
-        logger.info(f"Заголовки таблицы: {headers}")
-        logger.info(f"Всего строк данных: {len(all_data) - 1}")
+        logger.info(f"Всего строк данных: {len(all_data)}")
         if len(all_data) > 1:
             logger.info(f"Первые 3 строки данных: {all_data[1:4]}")
 
@@ -470,6 +469,7 @@ async def generate_channels_report(query):
         
         # Находим индексы колонок по заголовкам
         headers = all_data[0]
+        logger.info(f"Заголовки таблицы: {headers}")
         try:
             channel_idx = headers.index("Канал продаж")
             product_idx = headers.index("Наименование товара")
@@ -555,8 +555,9 @@ async def generate_products_report(query):
         sheet = get_google_sheet_cached()
         all_data = sheet.get_all_values()
         
-        logger.info(f"Заголовки таблицы: {headers}")
-        logger.info(f"Всего строк данных: {len(all_data) - 1}")
+        logger.info(f"Всего строк данных: {len(all_data)}")
+        if len(all_data) > 1:
+            logger.info(f"Первые 3 строки данных: {all_data[1:4]}")
 
         if len(all_data) <= 1:
             await query.edit_message_text("📦 Нет данных для отчета")
@@ -564,6 +565,7 @@ async def generate_products_report(query):
         
         # Находим индексы колонок по заголовкам
         headers = all_data[0]
+        logger.info(f"Заголовки таблицы: {headers}")
         try:
             product_idx = headers.index("Наименование товара")
             qty_idx = headers.index("Количество")
