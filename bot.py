@@ -445,14 +445,14 @@ async def handle_product_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         row_data = [
             channel, 
             product_name, 
-            quantity,  # Число как есть
-            f"р. {product_price:,.2f}".replace(',', '\xa0'),  # Форматированная цена
-            f"р. {quantity * product_price:,.2f}".replace(',', '\xa0'),  # Форматированная сумма
+            quantity,  # Число как есть (не строку!)
+            product_price,  # Число как есть
+            quantity * product_price,  # Число как есть
             datetime.now().strftime("%d.%m.%Y")
         ]
         
         # Вставляем данные
-        sheet.append_row(row_data)
+        sheet.append_row(row_data, value_input_option='USER_ENTERED')
         logger.info(f"✅ Данные записаны в строку {next_row}: {row_data}")
 
         # Формируем сообщение об успехе
