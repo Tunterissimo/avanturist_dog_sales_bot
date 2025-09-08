@@ -83,6 +83,32 @@ def debug_catalog():
     except Exception as e:
         logger.error(f"❌ Ошибка при чтении каталога: {e}")
 
+def check_catalog_structure():
+    """Проверяет структуру каталога товаров"""
+    try:
+        sheet = get_google_sheet_cached()
+        catalog_sheet = sheet.spreadsheet.worksheet(CATALOG_SHEET_NAME)
+        all_data = catalog_sheet.get_all_values()
+        
+        logger.info("🔍 ПРОВЕРКА СТРУКТУРЫ КАТАЛОГА:")
+        if len(all_data) > 0:
+            logger.info(f"Заголовки: {all_data[0]}")
+            
+        # Проверяем первые 10 строк
+        for i in range(min(11, len(all_data))):
+            row = all_data[i]
+            if i == 0:
+                logger.info("📋 Заголовки каталога:")
+            else:
+                logger.info(f"📋 Строка {i}:")
+            
+            for col_idx, value in enumerate(row[:8]):  # Первые 8 колонок
+                logger.info(f"   Колонка {col_idx}: '{value}'")
+                
+    except Exception as e:
+        logger.error(f"❌ Ошибка проверки структуры каталога: {e}")
+
+
 # ==================== НАСТРОЙКА ЛОГГИРОВАНИЯ ====================
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -306,30 +332,44 @@ def get_product_price_from_catalog(product_type, width, size, color_type, color)
         
         logger.info(f"🔍 Поиск цены для: product_type='{product_type}', width='{width}', size='{size}', color_type='{color_type}', color='{color}'")
         
+        # Исправляем значение 'None' на пустую строку
+        if size == 'None':
+            size = ''
+        if width == 'None':
+            width = ''
+        
+        # Функция для нормализации сравнения (приводим к нижнему регистру и убираем пробелы)
+        def normalize(text):
+            return str(text).lower().strip() if text else ""
+        
+        norm_product_type = normalize(product_type)
+        norm_width = normalize(width)
+        norm_size = normalize(size)
+        norm_color_type = normalize(color_type)
+        norm_color = normalize(color)
+        
         # Пропускаем заголовок
         for i, row in enumerate(all_data[1:], start=2):
             if len(row) < 8:
                 continue
                 
             # Получаем значения из каталога
-            catalog_id = row[0].strip() if len(row) > 0 else ""
-            catalog_name = row[1].strip() if len(row) > 1 else ""
-            catalog_product_type = row[2].strip() if len(row) > 2 else ""
-            catalog_width = row[3].strip() if len(row) > 3 else ""
-            catalog_size = row[4].strip() if len(row) > 4 else ""
-            catalog_color_type = row[5].strip() if len(row) > 5 else ""
-            catalog_color = row[6].strip() if len(row) > 6 else ""
+            catalog_product_type = normalize(row[2]) if len(row) > 2 else ""
+            catalog_width = normalize(row[3]) if len(row) > 3 else ""
+            catalog_size = normalize(row[4]) if len(row) > 4 else ""
+            catalog_color_type = normalize(row[5]) if len(row) > 5 else ""
+            catalog_color = normalize(row[6]) if len(row) > 6 else ""
             catalog_price = row[7].strip() if len(row) > 7 else ""
             
             # Логируем для отладки
-            logger.info(f"📋 Каталог строка {i}: ID='{catalog_id}', Тип='{catalog_product_type}', Ширина='{catalog_width}', Размер='{catalog_size}', ТипРасцветки='{catalog_color_type}', Расцветка='{catalog_color}', Цена='{catalog_price}'")
+            logger.info(f"📋 Сравниваем с каталогом: '{catalog_product_type}', '{catalog_width}', '{catalog_size}', '{catalog_color_type}', '{catalog_color}'")
             
             # Проверяем соответствие всех параметров
-            type_match = catalog_product_type == product_type
-            width_match = (not width) or (catalog_width == width) or (width == "" and catalog_width == "")
-            size_match = (not size) or (catalog_size == size) or (size == "" and catalog_size == "")
-            color_type_match = catalog_color_type == color_type
-            color_match = catalog_color == color
+            type_match = catalog_product_type == norm_product_type
+            width_match = (not norm_width) or (catalog_width == norm_width)
+            size_match = (not norm_size) or (catalog_size == norm_size)
+            color_type_match = catalog_color_type == norm_color_type
+            color_match = catalog_color == norm_color
             
             logger.info(f"   Совпадения: Тип={type_match}, Ширина={width_match}, Размер={size_match}, ТипРасцветки={color_type_match}, Расцветка={color_match}")
             
@@ -351,14 +391,14 @@ def get_product_price_from_catalog(product_type, width, size, color_type, color)
             if len(row) < 8:
                 continue
                 
-            catalog_product_type = row[2].strip() if len(row) > 2 else ""
-            catalog_color_type = row[5].strip() if len(row) > 5 else ""
-            catalog_color = row[6].strip() if len(row) > 6 else ""
+            catalog_product_type = normalize(row[2]) if len(row) > 2 else ""
+            catalog_color_type = normalize(row[5]) if len(row) > 5 else ""
+            catalog_color = normalize(row[6]) if len(row) > 6 else ""
             catalog_price = row[7].strip() if len(row) > 7 else ""
             
-            if (catalog_product_type == product_type and 
-                catalog_color_type == color_type and 
-                catalog_color == color and 
+            if (catalog_product_type == norm_product_type and 
+                catalog_color_type == norm_color_type and 
+                catalog_color == norm_color and 
                 catalog_price):
                 
                 try:
@@ -373,12 +413,12 @@ def get_product_price_from_catalog(product_type, width, size, color_type, color)
             if len(row) < 8:
                 continue
                 
-            catalog_product_type = row[2].strip() if len(row) > 2 else ""
-            catalog_color = row[6].strip() if len(row) > 6 else ""
+            catalog_product_type = normalize(row[2]) if len(row) > 2 else ""
+            catalog_color = normalize(row[6]) if len(row) > 6 else ""
             catalog_price = row[7].strip() if len(row) > 7 else ""
             
-            if (catalog_product_type == product_type and 
-                catalog_color == color and 
+            if (catalog_product_type == norm_product_type and 
+                catalog_color == norm_color and 
                 catalog_price):
                 
                 try:
@@ -389,12 +429,21 @@ def get_product_price_from_catalog(product_type, width, size, color_type, color)
                     continue
         
         logger.error("❌ Цена не найдена ни по одному критерию")
+        
+        # Выводим все записи каталога для отладки
+        logger.info("📊 ВСЕ ЗАПИСИ КАТАЛОГА:")
+        for i, row in enumerate(all_data):
+            if i == 0:
+                logger.info(f"Заголовки: {row}")
+            elif len(row) >= 8:
+                logger.info(f"Строка {i+1}: Тип='{row[2]}', Ширина='{row[3]}', Размер='{row[4]}', ТипРасцветки='{row[5]}', Расцветка='{row[6]}', Цена='{row[7]}'")
+        
         return 0
         
     except Exception as e:
         logger.error(f"❌ Ошибка поиска цены: {e}", exc_info=True)
         return 0
-
+    
 # ==================== КЛАВИАТУРЫ ====================
 def sales_channels_keyboard():
     """Создает клавиатуру с каналами продаж из Google Таблицы"""
@@ -1139,6 +1188,9 @@ if __name__ == "__main__":
 
     # Для отладки - выводим весь каталог
     debug_catalog()
+
+    # Проверяем структуру каталога
+    check_catalog_structure()
     
     # Создаем и запускаем бота
     application = Application.builder().token(BOT_TOKEN).build()
