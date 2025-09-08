@@ -304,7 +304,7 @@ def get_product_price_from_catalog(product_type, width, size, color_type, color)
         catalog_sheet = sheet.spreadsheet.worksheet(CATALOG_SHEET_NAME)
         all_data = catalog_sheet.get_all_values()
         
-        logger.info(f"🔍 Поиск цены для: '{product_type}', '{width}', '{size}', '{color_type}', '{color}'")
+        logger.info(f"🔍 Поиск цены для: product_type='{product_type}', width='{width}', size='{size}', color_type='{color_type}', color='{color}'")
         
         # Пропускаем заголовок
         for i, row in enumerate(all_data[1:], start=2):
@@ -312,6 +312,8 @@ def get_product_price_from_catalog(product_type, width, size, color_type, color)
                 continue
                 
             # Получаем значения из каталога
+            catalog_id = row[0].strip() if len(row) > 0 else ""
+            catalog_name = row[1].strip() if len(row) > 1 else ""
             catalog_product_type = row[2].strip() if len(row) > 2 else ""
             catalog_width = row[3].strip() if len(row) > 3 else ""
             catalog_size = row[4].strip() if len(row) > 4 else ""
@@ -319,84 +321,74 @@ def get_product_price_from_catalog(product_type, width, size, color_type, color)
             catalog_color = row[6].strip() if len(row) > 6 else ""
             catalog_price = row[7].strip() if len(row) > 7 else ""
             
-            # Логируем для отладки первые несколько строк
-            if i <= 5:
-                logger.info(f"Каталог строка {i}: '{catalog_product_type}', '{catalog_width}', '{catalog_size}', '{catalog_color_type}', '{catalog_color}' -> '{catalog_price}'")
+            # Логируем для отладки
+            logger.info(f"📋 Каталог строка {i}: ID='{catalog_id}', Тип='{catalog_product_type}', Ширина='{catalog_width}', Размер='{catalog_size}', ТипРасцветки='{catalog_color_type}', Расцветка='{catalog_color}', Цена='{catalog_price}'")
             
-            # Нормализуем значения для сравнения (приводим к нижнему регистру и убираем лишние пробелы)
-            def normalize_value(value):
-                return value.lower().strip() if value else ""
+            # Проверяем соответствие всех параметров
+            type_match = catalog_product_type == product_type
+            width_match = (not width) or (catalog_width == width) or (width == "" and catalog_width == "")
+            size_match = (not size) or (catalog_size == size) or (size == "" and catalog_size == "")
+            color_type_match = catalog_color_type == color_type
+            color_match = catalog_color == color
             
-            search_product_type = normalize_value(product_type)
-            search_width = normalize_value(width)
-            search_size = normalize_value(size)
-            search_color_type = normalize_value(color_type)
-            search_color = normalize_value(color)
-            
-            cat_product_type = normalize_value(catalog_product_type)
-            cat_width = normalize_value(catalog_width)
-            cat_size = normalize_value(catalog_size)
-            cat_color_type = normalize_value(catalog_color_type)
-            cat_color = normalize_value(catalog_color)
-            
-            # Проверяем соответствие с учетом того, что некоторые параметры могут быть пустыми
-            type_match = search_product_type == cat_product_type
-            width_match = (not search_width) or (search_width == cat_width) or (search_width == "" and cat_width == "")
-            size_match = (not search_size) or (search_size == cat_size) or (search_size == "" and cat_size == "")
-            color_type_match = search_color_type == cat_color_type
-            color_match = search_color == cat_color
+            logger.info(f"   Совпадения: Тип={type_match}, Ширина={width_match}, Размер={size_match}, ТипРасцветки={color_type_match}, Расцветка={color_match}")
             
             if (type_match and width_match and size_match and 
                 color_type_match and color_match and catalog_price):
                 
                 try:
                     price_value = float(clean_numeric_value(catalog_price))
-                    logger.info(f"✅ Найдена цена: {price_value} руб. для строки {i}")
+                    logger.info(f"✅ Найдена точная цена: {price_value} руб.")
                     return price_value
                 except ValueError:
-                    logger.warning(f"❌ Неверный формат цены в строке {i}: '{catalog_price}'")
+                    logger.warning(f"❌ Неверный формат цены: '{catalog_price}'")
                     continue
         
-        logger.warning(f"❌ Точное совпадение не найдено, ищем частичное...")
+        logger.warning("🔍 Поиск по упрощенным критериям...")
         
-        # Если точное совпадение не найдено, ищем частичное
+        # Поиск только по типу товара, типу расцветки и расцветке
         for i, row in enumerate(all_data[1:], start=2):
             if len(row) < 8:
                 continue
                 
             catalog_product_type = row[2].strip() if len(row) > 2 else ""
-            catalog_width = row[3].strip() if len(row) > 3 else ""
-            catalog_size = row[4].strip() if len(row) > 4 else ""
             catalog_color_type = row[5].strip() if len(row) > 5 else ""
             catalog_color = row[6].strip() if len(row) > 6 else ""
             catalog_price = row[7].strip() if len(row) > 7 else ""
             
-            # Нормализуем значения
-            def normalize_value(value):
-                return value.lower().strip() if value else ""
-            
-            search_product_type = normalize_value(product_type)
-            search_color_type = normalize_value(color_type)
-            search_color = normalize_value(color)
-            
-            cat_product_type = normalize_value(catalog_product_type)
-            cat_color_type = normalize_value(catalog_color_type)
-            cat_color = normalize_value(catalog_color)
-            
-            # Ищем по основным параметрам (тип товара, тип расцветки, расцветка)
-            if (search_product_type == cat_product_type and 
-                search_color_type == cat_color_type and 
-                search_color == cat_color and 
+            if (catalog_product_type == product_type and 
+                catalog_color_type == color_type and 
+                catalog_color == color and 
                 catalog_price):
                 
                 try:
                     price_value = float(clean_numeric_value(catalog_price))
-                    logger.info(f"⚠️ Найдена цена по основным параметрам: {price_value} руб.")
+                    logger.info(f"⚠️ Найдена цена по упрощенным параметрам: {price_value} руб.")
                     return price_value
                 except ValueError:
                     continue
         
-        logger.error(f"❌ Цена не найдена")
+        # Поиск только по типу товара и расцветке
+        for i, row in enumerate(all_data[1:], start=2):
+            if len(row) < 8:
+                continue
+                
+            catalog_product_type = row[2].strip() if len(row) > 2 else ""
+            catalog_color = row[6].strip() if len(row) > 6 else ""
+            catalog_price = row[7].strip() if len(row) > 7 else ""
+            
+            if (catalog_product_type == product_type and 
+                catalog_color == color and 
+                catalog_price):
+                
+                try:
+                    price_value = float(clean_numeric_value(catalog_price))
+                    logger.info(f"⚠️ Найдена цена только по типу и расцветке: {price_value} руб.")
+                    return price_value
+                except ValueError:
+                    continue
+        
+        logger.error("❌ Цена не найдена ни по одному критерию")
         return 0
         
     except Exception as e:
