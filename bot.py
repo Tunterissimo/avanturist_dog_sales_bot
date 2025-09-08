@@ -607,6 +607,27 @@ def colors_keyboard(selected_color_type):
         )
 
 
+def all_colors_keyboard():
+    """Клавиатура со всеми расцветками (для товаров Лежанка и Бусы)"""
+    try:
+        ref_data = get_reference_data()
+        keyboard = []
+
+        for color in ref_data["colors"]:
+            keyboard.append(
+                [InlineKeyboardButton(color, callback_data=f"color_{color}")]
+            )
+
+        keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
+        return InlineKeyboardMarkup(keyboard)
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания клавиатуры всех расцветок: {e}")
+        return InlineKeyboardMarkup(
+            [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+        )
+
+
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -697,9 +718,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 # Проверяем правила бизнес-процесса
                 if product_type in ["Лежанка", "Бусы"]:
-                    # Пропускаем ширину и размер, переходим к типу расцветки
+                    # Для Лежанки и Бус - пропускаем ширину, размер и тип расцветки, переходим сразу к выбору расцветки
                     await query.message.reply_text(
-                        "Выберите тип расцветки:", reply_markup=color_types_keyboard()
+                        "Выберите расцветку:", reply_markup=all_colors_keyboard()
                     )
                 elif product_type_data["has_width"]:
                     await query.message.reply_text(
@@ -776,10 +797,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # 6. Обработка ВЫБОРА РАСЦВЕТКИ
             elif data.startswith("color_"):
                 color = data.split("_", 1)[1]
-                cur.execute(
-                    "UPDATE user_states SET color = %s WHERE user_id = %s",
-                    (color, user_id),
-                )
+                
+                # Получаем текущее состояние пользователя
+                cur.execute("SELECT * FROM user_states WHERE user_id = %s", (user_id,))
+                user_state = cur.fetchone()
+                
+                # Для товаров Лежанка и Бусы устанавливаем тип расцветки как "Стандартный"
+                if user_state["product_type"] in ["Лежанка", "Бусы"]:
+                    cur.execute(
+                        "UPDATE user_states SET color_type = 'Стандартный', color = %s WHERE user_id = %s",
+                        (color, user_id),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE user_states SET color = %s WHERE user_id = %s",
+                        (color, user_id),
+                    )
 
                 # Получаем все выбранные параметры для формирования названия товара
                 cur.execute("SELECT * FROM user_states WHERE user_id = %s", (user_id,))
@@ -799,7 +832,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     product_name_parts.append(user_state["width"])
                 if user_state["size"]:
                     product_name_parts.append(user_state["size"])
-                product_name_parts.append(user_state["color_type"])
+                if user_state["color_type"]:
+                    product_name_parts.append(user_state["color_type"])
                 product_name_parts.append(user_state["color"])
 
                 product_name = " ".join(product_name_parts)
@@ -854,7 +888,6 @@ async def handle_quantity_input(update: Update, context: ContextTypes.DEFAULT_TY
             [
                 user_state["channel"],
                 user_state["product_type"],
-                user_state["color_type"],
                 user_state["color"],
             ]
         ):
@@ -863,347 +896,115 @@ async def handle_quantity_input(update: Update, context: ContextTypes.DEFAULT_TY
             )
             return
 
-        # Принимаем количество
+        # Для товаров Лежанка и Бусы проверяем, что тип расцветки установлен
+        if user_state["product_type"] in ["Лежанка", "Бусы"] and not user_state["color_type"]:
+            with get_db_cursor() as cur:
+                cur.execute(
+                    "UPDATE user_states SET color_type = 'Стандартный' WHERE user_id = %s",
+                    (user_id,),
+                )
+                user_state["color_type"] = "Стандартный"
+
+        # Проверяем, что введено число
         try:
-            quantity = float(user_message.strip().replace(",", "."))
+            quantity = int(user_message)
             if quantity <= 0:
                 await update.message.reply_text("❌ Количество должно быть больше 0")
                 return
+        except ValueError:
+            await update.message.reply_text("❌ Пожалуйста, введите число")
+            return
 
-            # Находим цену
-            price = get_product_price_from_catalog(
-                user_state["product_type"],
-                user_state["width"],
-                user_state["size"],
-                user_state["color_type"],
-                user_state["color"],
-            )
+        # Находим цену
+        price = get_product_price_from_catalog(
+            user_state["product_type"],
+            user_state["width"],
+            user_state["size"],
+            user_state["color_type"],
+            user_state["color"],
+        )
 
-            total_amount = quantity * price
+        total_price = price * quantity
 
-            # Формируем название товара
-            product_name_parts = [user_state["product_type"]]
-            if user_state["width"]:
-                product_name_parts.append(user_state["width"])
-            if user_state["size"]:
-                product_name_parts.append(user_state["size"])
+        # Формируем название товара
+        product_name_parts = [user_state["product_type"]]
+        if user_state["width"]:
+            product_name_parts.append(user_state["width"])
+        if user_state["size"]:
+            product_name_parts.append(user_state["size"])
+        if user_state["color_type"]:
             product_name_parts.append(user_state["color_type"])
-            product_name_parts.append(user_state["color"])
-            product_name = " ".join(product_name_parts)
+        product_name_parts.append(user_state["color"])
 
-            # Записываем в новую таблицу
+        product_name = " ".join(product_name_parts)
+
+        # Записываем в Google Таблицу
+        try:
             sheet = get_google_sheet_cached()
-            new_sheet = sheet.spreadsheet.worksheet(NEW_SHEET_NAME)
-
-            row_data = [
+            new_row = [
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 user_state["channel"],
-                user_state["product_type"],
-                user_state["width"] or "",
-                user_state["size"] or "",
-                user_state["color_type"],
-                user_state["color"],
+                product_name,
                 quantity,
                 price,
-                total_amount,
-                datetime.now().strftime("%d.%m.%Y"),
+                total_price,
             ]
+            sheet.append_row(new_row)
+        except Exception as e:
+            logger.error(f"❌ Ошибка записи в Google Таблицу: {e}")
+            await update.message.reply_text("❌ Ошибка записи данных")
+            return
 
-            new_sheet.append_row(row_data, value_input_option="USER_ENTERED")
+        # Формируем сообщение о результате
+        result_message = (
+            f"✅ *Продажа добавлена!*\n\n"
+            f"*Канал:* {user_state['channel']}\n"
+            f"*Товар:* {product_name}\n"
+            f"*Количество:* {quantity}\n"
+            f"*Цена за шт:* {price:.2f} руб.\n"
+            f"*Общая сумма:* {total_price:.2f} руб."
+        )
 
-            # Формируем сообщение об успехе
-            success_text = f"""✅ Данные успешно добавлены в новую таблицу!
+        await update.message.reply_text(result_message, parse_mode="Markdown")
 
-*Канал продаж:* {user_state["channel"]}
-*Товар:* {product_name}
-*Количество:* {quantity}
-*Цена:* {price:.2f} руб.
-*Сумма:* {total_amount:.2f} руб.
-"""
-            await update.message.reply_text(success_text, parse_mode="Markdown")
-            logger.info(f"👤 User {user_id} added new record: {row_data}")
-
-            # Очищаем состояние пользователя
+        # Очищаем состояние пользователя
+        try:
             with get_db_cursor() as cur:
                 cur.execute(
                     "UPDATE user_states SET channel = NULL, product_type = NULL, width = NULL, size = NULL, color_type = NULL, color = NULL WHERE user_id = %s",
                     (user_id,),
                 )
-
-        except ValueError:
-            await update.message.reply_text(
-                "❌ Ошибка: количество должно быть числом. Пример: `2` или `1.5`",
-                parse_mode="Markdown",
-            )
+        except Exception as e:
+            logger.error(f"❌ Ошибка очистки состояния: {e}")
 
     except Exception as e:
-        logger.error(f"❌ Ошибка при записи в Google Таблицу: {e}", exc_info=True)
-        await update.message.reply_text(
-            "❌ Произошла ошибка при записи. Попробуйте позже."
-        )
+        logger.error(f"❌ Ошибка в handle_quantity_input: {e}")
+        await update.message.reply_text("❌ Ошибка обработки запроса")
 
 
-# ==================== ОТЧЕТЫ ====================
-async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Генерация отчета"""
-    try:
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "📊 Отчет по каналам продаж", callback_data="report_channels"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "📦 Отчет по товарам", callback_data="report_products"
-                )
-            ],
-            [InlineKeyboardButton("❌ Отмена", callback_data="report_cancel")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+# ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
+def main():
+    """Основная функция запуска бота"""
+    logger.info("🚀 Запуск бота...")
 
-        await update.message.reply_text(
-            "📈 Выберите тип отчета:", reply_markup=reply_markup
-        )
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка в generate_report: {e}")
-        await update.message.reply_text("❌ Ошибка генерации отчета")
-
-
-async def handle_report_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопок отчетов"""
-    query = update.callback_query
-    data = query.data
-
-    await query.answer()
-
-    if data == "report_channels":
-        await generate_channels_report(query)
-    elif data == "report_products":
-        await generate_products_report(query)
-    elif data == "report_cancel":
-        await query.edit_message_text("❌ Генерация отчета отменена")
-
-
-async def generate_channels_report(query):
-    """Генерация отчета по каналам продаж"""
-    try:
-        sheet = get_google_sheet_cached()
-        all_data = sheet.get_all_values()
-
-        logger.info(f"Всего строк данных: {len(all_data)}")
-        if len(all_data) > 1:
-            logger.info(f"Первые 3 строки данных: {all_data[1:4]}")
-
-        if len(all_data) <= 1:
-            await query.edit_message_text("📊 Нет данных для отчета")
-            return
-
-        # Находим индексы колонок по заголовкам
-        headers = all_data[0]
-        logger.info(f"Заголовки таблицы: {headers}")
-        try:
-            channel_idx = headers.index("Канал продаж")
-            product_idx = headers.index("Наименование товара")
-            qty_idx = headers.index("Количество")
-            price_idx = headers.index("Цена")
-            amount_idx = headers.index("Сумма")
-        except ValueError as e:
-            logger.error(f"❌ Не найдена ожидаемая колонка: {e}. Заголовки: {headers}")
-            await query.edit_message_text(
-                "❌ Ошибка: таблица имеет неверную структуру."
-            )
-            return
-
-        # Парсим данные
-        sales_data = []
-        for row in all_data[1:]:
-            # Пропускаем пустые строки
-            if not any(row) or len(row) < 6:  # Проверяем, что есть все 6 колонок
-                continue
-
-            try:
-                # Очищаем числовые значения
-                cleaned_qty = clean_numeric_value(row[qty_idx])
-                cleaned_amount = clean_numeric_value(row[amount_idx])
-                cleaned_price = (
-                    clean_numeric_value(row[price_idx])
-                    if len(row) > price_idx and row[price_idx]
-                    else "0"
-                )
-
-                sales_data.append(
-                    {
-                        "channel": row[channel_idx],
-                        "product": row[product_idx] if len(row) > product_idx else "",
-                        "quantity": float(cleaned_qty),
-                        "price": float(cleaned_price),
-                        "amount": float(cleaned_amount),
-                    }
-                )
-            except (ValueError, IndexError) as e:
-                logger.warning(
-                    f"Пропущена строка из-за ошибки формата: {row}. Ошибка: {e}"
-                )
-                continue
-
-        if not sales_data:
-            await query.edit_message_text("📊 Нет данных для анализа")
-            return
-
-        # Анализируем данные по каналам
-        channel_stats = {}
-        for sale in sales_data:
-            channel = sale["channel"]
-            # Проверяем, что канал есть в актуальном списке
-            available_channels = get_channels_from_sheet()
-            if channel not in available_channels:
-                logger.warning(f"⚠️ Неизвестный канал в данных: {channel}")
-                continue
-
-            if channel not in channel_stats:
-                channel_stats[channel] = {
-                    "count": 0,
-                    "total_amount": 0,
-                    "total_quantity": 0,
-                }
-
-            channel_stats[channel]["count"] += 1
-            channel_stats[channel]["total_amount"] += sale["amount"]
-            channel_stats[channel]["total_quantity"] += sale["quantity"]
-
-        # Формируем отчет
-        report_text = "📊 ОТЧЕТ ПО КАНАЛАм ПРОДАЖ\n\n"
-        report_text += "```\n"
-        report_text += "Канал         | Продажи | Количество | Сумма       \n"
-        report_text += "--------------+---------+------------+-------------\n"
-
-        total_amount = 0
-        total_quantity = 0
-        total_sales = len(sales_data)
-
-        for channel, stats in sorted(channel_stats.items()):
-            report_text += f"{channel:<13} | {stats['count']:>7} | {stats['total_quantity']:>10.2f} | {stats['total_amount']:>11.2f}\n"
-            total_amount += stats["total_amount"]
-            total_quantity += stats["total_quantity"]
-
-        report_text += "--------------+---------+------------+-------------\n"
-        report_text += f"{'ИТОГО':<13} | {total_sales:>7} | {total_quantity:>10.2f} | {total_amount:>11.2f}\n"
-        report_text += "```"
-
-        await query.edit_message_text(report_text, parse_mode="Markdown")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка генерации отчета: {e}")
-        await query.edit_message_text("❌ Ошибка генерации отчета")
-
-
-async def generate_products_report(query):
-    """Генерация отчета по товарам"""
-    try:
-        sheet = get_google_sheet_cached()
-        all_data = sheet.get_all_values()
-
-        logger.info(f"Всего строк данных: {len(all_data)}")
-        if len(all_data) > 1:
-            logger.info(f"Первые 3 строки данных: {all_data[1:4]}")
-
-        if len(all_data) <= 1:
-            await query.edit_message_text("📦 Нет данных для отчета")
-            return
-
-        # Находим индексы колонок по заголовкам
-        headers = all_data[0]
-        logger.info(f"Заголовки таблица: {headers}")
-        try:
-            product_idx = headers.index("Наименование товара")
-            qty_idx = headers.index("Количество")
-            amount_idx = headers.index("Сумма")
-        except ValueError as e:
-            logger.error(f"❌ Не найдена ожидаемая колонка: {e}. Заголовки: {headers}")
-            await query.edit_message_text(
-                "❌ Ошибка: таблица имеет неверную структуру."
-            )
-            return
-
-        # Анализируем данные по товарам
-        product_stats = {}
-        for row in all_data[1:]:
-            # Пропускаем пустые строки
-            if not any(row) or len(row) < 6:
-                continue
-
-            try:
-                # Очищаем числовые значения
-                cleaned_qty = clean_numeric_value(row[qty_idx])
-                cleaned_amount = clean_numeric_value(row[amount_idx])
-
-                product = row[product_idx]
-                quantity = float(cleaned_qty)
-                amount = float(cleaned_amount)
-
-                if product not in product_stats:
-                    product_stats[product] = {
-                        "count": 0,
-                        "total_amount": 0,
-                        "total_quantity": 0,
-                    }
-
-                product_stats[product]["count"] += 1
-                product_stats[product]["total_amount"] += amount
-                product_stats[product]["total_quantity"] += quantity
-
-            except (ValueError, IndexError) as e:
-                logger.warning(
-                    f"Пропущена строка из-за ошибки формата: {row}. Ошибка: {e}"
-                )
-                continue
-
-        if not product_stats:
-            await query.edit_message_text("📦 Нет данных для анализа")
-            return
-
-        # Формируем отчет
-        report_text = "📦 ОТЧЕТ ПО ТОВАРАМ\n\n"
-        report_text += "```\n"
-        report_text += "Товар               | Продажи | Количество | Сумма       \n"
-        report_text += "--------------------+---------+------------+-------------\n"
-
-        for product, stats in sorted(product_stats.items()):
-            report_text += f"{product:<19} | {stats['count']:>7} | {stats['total_quantity']:>10.2f} | {stats['total_amount']:>11.2f}\n"
-
-        report_text += "```"
-
-        await query.edit_message_text(report_text, parse_mode="Markdown")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка генерации отчета по товарам: {e}")
-        await query.edit_message_text("❌ Ошибка генерации отчета")
-
-
-# ==================== ЗАПУСК БОТА ====================
-if __name__ == "__main__":
-    # Инициализируем базу данных при старте
+    # Инициализация БД
     init_db()
 
-    # Для отладки - выводим весь каталог
-    debug_catalog()
-
-    # Проверяем структуру каталога
-    check_catalog_structure()
-    
-    # Создаем и запускаем бота
+    # Создание приложения
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Добавляем обработчики
+    # Добавление обработчиков
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("add", add_entry))
-    application.add_handler(CommandHandler("report", generate_report))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quantity_input)
     )
 
-    # Запускаем бота
-    logger.info("🤖 Бот запущен с новым процессом...")
-    application.run_polling()
+    # Запуск бота
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("🤖 Бот запущен и готов к работе!")
+
+
+if __name__ == "__main__":
+    main()
