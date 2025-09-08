@@ -896,26 +896,18 @@ async def handle_quantity_input(update: Update, context: ContextTypes.DEFAULT_TY
             )
             return
 
-        # Для товаров Лежанка и Бусы проверяем, что тип расцветки установлен
-        if user_state["product_type"] in ["Лежанка", "Бусы"] and not user_state["color_type"]:
-            with get_db_cursor() as cur:
-                cur.execute(
-                    "UPDATE user_states SET color_type = 'Стандартный' WHERE user_id = %s",
-                    (user_id,),
-                )
-                user_state["color_type"] = "Стандартный"
-
-        # Проверяем, что введено число
+        # Парсим количество
         try:
             quantity = int(user_message)
             if quantity <= 0:
-                await update.message.reply_text("❌ Количество должно быть больше 0")
-                return
+                raise ValueError
         except ValueError:
-            await update.message.reply_text("❌ Пожалуйста, введите число")
+            await update.message.reply_text(
+                "❌ Пожалуйста, введите корректное количество (целое положительное число):"
+            )
             return
 
-        # Находим цену
+        # Получаем цену из каталога
         price = get_product_price_from_catalog(
             user_state["product_type"],
             user_state["width"],
@@ -924,9 +916,33 @@ async def handle_quantity_input(update: Update, context: ContextTypes.DEFAULT_TY
             user_state["color"],
         )
 
-        total_price = price * quantity
+        total_amount = price * quantity
 
-        # Формируем название товара
+        # Формируем данные для записи в Google Таблицу
+        row_data = [
+            user_state["channel"],  # Канал продажи
+            user_state["product_type"],  # Тип товара
+            user_state["width"] or "",  # Ширина
+            user_state["size"] or "",  # Размер
+            user_state["color_type"] or "",  # Тип расцветки
+            user_state["color"],  # Расцветка
+            str(quantity),  # Количество
+            str(price),  # Цена
+            str(total_amount),  # Сумма
+            datetime.now().strftime("%d.%m.%Y"),  # Дата
+        ]
+
+        # Записываем в Google Таблицу
+        try:
+            sheet = get_google_sheet_cached()
+            sheet.append_row(row_data)
+            logger.info(f"✅ Запись добавлена в Google Таблицу: {row_data}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка записи в Google Таблицу: {e}")
+            await update.message.reply_text("❌ Ошибка записи данных")
+            return
+
+        # Формируем название товара для сообщения
         product_name_parts = [user_state["product_type"]]
         if user_state["width"]:
             product_name_parts.append(user_state["width"])
@@ -935,47 +951,26 @@ async def handle_quantity_input(update: Update, context: ContextTypes.DEFAULT_TY
         if user_state["color_type"]:
             product_name_parts.append(user_state["color_type"])
         product_name_parts.append(user_state["color"])
-
         product_name = " ".join(product_name_parts)
 
-        # Записываем в Google Таблицу
-        try:
-            sheet = get_google_sheet_cached()
-            new_row = [
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                user_state["channel"],
-                product_name,
-                quantity,
-                price,
-                total_price,
-            ]
-            sheet.append_row(new_row)
-        except Exception as e:
-            logger.error(f"❌ Ошибка записи в Google Таблицу: {e}")
-            await update.message.reply_text("❌ Ошибка записи данных")
-            return
-
-        # Формируем сообщение о результате
-        result_message = (
+        # Отправляем подтверждение
+        await update.message.reply_text(
             f"✅ *Продажа добавлена!*\n\n"
             f"*Канал:* {user_state['channel']}\n"
             f"*Товар:* {product_name}\n"
-            f"*Количество:* {quantity}\n"
-            f"*Цена за шт:* {price:.2f} руб.\n"
-            f"*Общая сумма:* {total_price:.2f} руб."
+            f"*Количество:* {quantity} шт.\n"
+            f"*Цена:* {price:.2f} руб.\n"
+            f"*Сумма:* {total_amount:.2f} руб.\n\n"
+            f"Для новой записи используйте /add",
+            parse_mode="Markdown",
         )
 
-        await update.message.reply_text(result_message, parse_mode="Markdown")
-
         # Очищаем состояние пользователя
-        try:
-            with get_db_cursor() as cur:
-                cur.execute(
-                    "UPDATE user_states SET channel = NULL, product_type = NULL, width = NULL, size = NULL, color_type = NULL, color = NULL WHERE user_id = %s",
-                    (user_id,),
-                )
-        except Exception as e:
-            logger.error(f"❌ Ошибка очистки состояния: {e}")
+        with get_db_cursor() as cur:
+            cur.execute(
+                "UPDATE user_states SET channel = NULL, product_type = NULL, width = NULL, size = NULL, color_type = NULL, color = NULL WHERE user_id = %s",
+                (user_id,),
+            )
 
     except Exception as e:
         logger.error(f"❌ Ошибка в handle_quantity_input: {e}")
@@ -985,25 +980,28 @@ async def handle_quantity_input(update: Update, context: ContextTypes.DEFAULT_TY
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
 def main():
     """Основная функция запуска бота"""
-    logger.info("🚀 Запуск бота...")
+    try:
+        # Инициализация БД
+        init_db()
 
-    # Инициализация БД
-    init_db()
+        # Создание приложения
+        application = Application.builder().token(BOT_TOKEN).build()
 
-    # Создание приложения
-    application = Application.builder().token(BOT_TOKEN).build()
+        # Добавление обработчиков
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("add", add_entry))
+        application.add_handler(CallbackQueryHandler(button_handler))
+        application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quantity_input)
+        )
 
-    # Добавление обработчиков
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("add", add_entry))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quantity_input)
-    )
+        # Запуск бота
+        logger.info("🤖 Бот запущен...")
+        application.run_polling()
 
-    # Запуск бота
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-    logger.info("🤖 Бот запущен и готов к работе!")
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}")
+        raise
 
 
 if __name__ == "__main__":
