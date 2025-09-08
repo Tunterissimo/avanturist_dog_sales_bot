@@ -284,25 +284,64 @@ def get_product_price_from_catalog(product_type, width, size, color_type, color)
         sheet = get_google_sheet_cached()
         catalog_sheet = sheet.spreadsheet.worksheet(CATALOG_SHEET_NAME)
         all_data = catalog_sheet.get_all_values()
-
+        
+        logger.info(f"🔍 Поиск цены для: {product_type}, {width}, {size}, {color_type}, {color}")
+        logger.info(f"📊 Всего строк в каталоге: {len(all_data)}")
+        
         # Пропускаем заголовок
-        for row in all_data[1:]:
-            if (
-                len(row) >= 8
-                and row[2].strip() == product_type
-                and (not width or row[3].strip() == width)
-                and (not size or row[4].strip() == size)
-                and row[5].strip() == color_type
-                and row[6].strip() == color
-            ):
-
-                return float(clean_numeric_value(row[7])) if row[7] else 0
-
-        logger.warning(
-            f"❌ Цена не найдена для: {product_type}, {width}, {size}, {color_type}, {color}"
-        )
+        for i, row in enumerate(all_data[1:], start=2):
+            if len(row) < 8:
+                continue
+                
+            # Логируем каждую строку для отладки
+            if i <= 10:  # Логируем первые 10 строк
+                logger.info(f"Строка {i}: {row}")
+            
+            # Проверяем соответствие всем параметрам
+            catalog_product_type = row[2].strip() if len(row) > 2 else ""
+            catalog_width = row[3].strip() if len(row) > 3 else ""
+            catalog_size = row[4].strip() if len(row) > 4 else ""
+            catalog_color_type = row[5].strip() if len(row) > 5 else ""
+            catalog_color = row[6].strip() if len(row) > 6 else ""
+            catalog_price = row[7].strip() if len(row) > 7 else ""
+            
+            # Проверяем соответствие (учитываем, что некоторые параметры могут быть пустыми)
+            type_match = catalog_product_type == product_type
+            width_match = (not width) or (catalog_width == width) or (width == "" and catalog_width == "")
+            size_match = (not size) or (catalog_size == size) or (size == "" and catalog_size == "")
+            color_type_match = catalog_color_type == color_type
+            color_match = catalog_color == color
+            
+            if (type_match and width_match and size_match and 
+                color_type_match and color_match and catalog_price):
+                
+                price_value = float(clean_numeric_value(catalog_price))
+                logger.info(f"✅ Найдена цена: {price_value} руб. для строки {i}")
+                return price_value
+        
+        logger.warning(f"❌ Цена не найдена для: {product_type}, {width}, {size}, {color_type}, {color}")
+        # Попробуем найти хотя бы по основным параметрам
+        for i, row in enumerate(all_data[1:], start=2):
+            if len(row) < 8:
+                continue
+                
+            catalog_product_type = row[2].strip() if len(row) > 2 else ""
+            catalog_color_type = row[5].strip() if len(row) > 5 else ""
+            catalog_color = row[6].strip() if len(row) > 6 else ""
+            catalog_price = row[7].strip() if len(row) > 7 else ""
+            
+            if (catalog_product_type == product_type and 
+                catalog_color_type == color_type and 
+                catalog_color == color and 
+                catalog_price):
+                
+                price_value = float(clean_numeric_value(catalog_price))
+                logger.info(f"⚠️ Найдена цена по упрощенным параметрам: {price_value} руб.")
+                return price_value
+        
+        logger.error(f"❌ Цена не найдена даже по упрощенным параметрам")
         return 0
-
+        
     except Exception as e:
         logger.error(f"❌ Ошибка поиска цены: {e}")
         return 0
@@ -648,6 +687,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Получаем все выбранные параметры для формирования названия товара
                 cur.execute("SELECT * FROM user_states WHERE user_id = %s", (user_id,))
                 user_state = cur.fetchone()
+
+                # Логируем параметры для отладки
+                logger.info(f"🎯 Параметры товара: "
+                        f"Тип={user_state['product_type']}, "
+                        f"Ширина={user_state['width']}, "
+                        f"Размер={user_state['size']}, "
+                        f"ТипРасцветки={user_state['color_type']}, "
+                        f"Расцветка={user_state['color']}")
 
                 # Формируем название товара
                 product_name_parts = [user_state["product_type"]]
