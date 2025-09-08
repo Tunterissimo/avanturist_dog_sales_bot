@@ -33,7 +33,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-SHEET_NAME = "Продажи"
+SHEET_NAME = "Продажи - new"
 NEW_SHEET_NAME = "Продажи - new"
 PRODUCT_SHEET_NAME = "Продукция"
 CATALOG_SHEET_NAME = "Каталог товаров"
