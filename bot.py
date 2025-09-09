@@ -918,31 +918,31 @@ async def add_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"❌ Ошибка очистки состояния пользователя {user_id}: {e}")
 
-    # Отправляем сообщение с выбором канала продаж
+    # Запрашиваем канал продаж
     await update.message.reply_text(
-        "📊 Выберите канал продаж:",
+        "📺 Выберите канал продаж:",
         reply_markup=sales_channels_keyboard(),
     )
 
 
 async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /report для генерации отчетов"""
+    """Обработчик команды /report"""
     await update.message.reply_text(
-        "📈 Выберите тип отчета:",
+        "📊 Выберите тип отчета:",
         reply_markup=report_types_keyboard(),
     )
 
 
-# ==================== ОБРАБОТЧИКИ CALLBACK ====================
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик всех callback-запросов"""
+# ==================== ОБРАБОТЧИКИ КНОПОК ====================
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик всех callback запросов"""
     query = update.callback_query
     await query.answer()
 
     user_id = query.from_user.id
     callback_data = query.data
 
-    logger.info(f"📨 Callback от пользователя {user_id}: {callback_data}")
+    logger.info(f"🔄 Обработка callback от {user_id}: {callback_data}")
 
     # Обработка отмены
     if callback_data == "cancel":
@@ -953,41 +953,67 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (user_id,),
                 )
         except Exception as e:
-            logger.error(f"❌ Ошибка удаления состояния пользователя {user_id}: {e}")
+            logger.error(f"❌ Ошибка при отмене для пользователя {user_id}: {e}")
 
         await query.edit_message_text("❌ Операция отменена.")
         return
 
+    # Обработка отчетов
+    if callback_data == "report_channels":
+        sales_data = get_sales_data()
+        report = generate_channel_report(sales_data)
+        await query.edit_message_text(report, parse_mode="Markdown")
+        return
+
+    if callback_data == "report_products":
+        sales_data = get_sales_data()
+        report = generate_product_report(sales_data)
+        await query.edit_message_text(report, parse_mode="Markdown")
+        return
+
+    # Получаем текущее состояние пользователя из БД
+    try:
+        with get_db_cursor() as cur:
+            cur.execute(
+                "SELECT * FROM user_states WHERE user_id = %s",
+                (user_id,),
+            )
+            user_state = cur.fetchone()
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения состояния пользователя {user_id}: {e}")
+        await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
+        return
+
     # Обработка выбора канала продаж
-    if not callback_data.startswith(
-        ("type_", "width_", "size_", "colortype_", "color_", "payment_", "report_")
-    ):
+    if not user_state or not user_state.get("channel"):
+        # Сохраняем канал в БД
         try:
             with get_db_cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO user_states (user_id, channel)
                     VALUES (%s, %s)
-                    ON CONFLICT (user_id) 
-                    DO UPDATE SET channel = EXCLUDED.channel
+                    ON CONFLICT (user_id) DO UPDATE SET channel = EXCLUDED.channel
                     """,
                     (user_id, callback_data),
                 )
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения канала пользователя {user_id}: {e}")
-            await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
+            logger.error(f"❌ Ошибка сохранения канала для {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
             return
 
+        # Запрашиваем тип товара
         await query.edit_message_text(
-            f"📊 Канал продаж: {callback_data}\n\n🏷️ Выберите тип товара:",
+            "🏷️ Выберите тип товара:",
             reply_markup=product_types_keyboard(),
         )
         return
 
     # Обработка выбора типа товара
-    if callback_data.startswith("type_"):
-        product_type = callback_data[5:]  # Убираем префикс "type_"
+    if callback_data.startswith("type_") and not user_state.get("product_type"):
+        product_type = callback_data.replace("type_", "")
 
+        # Сохраняем тип товара в БД
         try:
             with get_db_cursor() as cur:
                 cur.execute(
@@ -999,50 +1025,55 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (product_type, user_id),
                 )
         except Exception as e:
-            logger.error(
-                f"❌ Ошибка сохранения типа товара пользователя {user_id}: {e}"
-            )
-            await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
+            logger.error(f"❌ Ошибка сохранения типа товара для {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
             return
 
-        # Получаем информацию о товаре из справочника
+        # Получаем информацию о типе товара из справочника
         ref_data = get_reference_data()
         product_info = next(
             (p for p in ref_data["product_types"] if p["type"] == product_type), None
         )
 
-        if product_info and product_info["has_width"]:
+        if not product_info:
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
+            return
+
+        # Проверяем тип товара для пропуска этапов
+        if product_type in ["Лежанка", "Бусы"]:
+            # Пропускаем выбор ширины и размера, переходим сразу к выбору расцветки
             await query.edit_message_text(
-                f"🏷️ Тип товара: {product_type}\n\n📏 Выберите ширину стропы:",
+                "🎨 Выберите расцветку:",
+                reply_markup=all_colors_keyboard(),
+            )
+            return
+
+        # Проверяем, нужно ли выбирать ширину
+        if product_info["has_width"]:
+            await query.edit_message_text(
+                "📏 Выберите ширину строп:",
                 reply_markup=widths_keyboard(),
             )
         else:
-            # Для товаров без ширины (Лежанка, Бусы) пропускаем выбор ширины и размера
-            try:
-                with get_db_cursor() as cur:
-                    cur.execute(
-                        """
-                        UPDATE user_states 
-                        SET width = 'None', size = 'None'
-                        WHERE user_id = %s
-                        """,
-                        (user_id,),
-                    )
-            except Exception as e:
-                logger.error(
-                    f"❌ Ошибка обновления состояния пользователя {user_id}: {e}"
+            # Если ширина не нужна, пропускаем к выбору размера или расцветки
+            if product_info["has_size"]:
+                await query.edit_message_text(
+                    "📐 Выберите размер:",
+                    reply_markup=sizes_keyboard(""),
                 )
-
-            await query.edit_message_text(
-                f"🏷️ Тип товара: {product_type}\n\n🎨 Выберите тип расцветки:",
-                reply_markup=color_types_keyboard(),
-            )
+            else:
+                # Если размер тоже не нужен, переходим к выбору типа расцветки
+                await query.edit_message_text(
+                    "🌈 Выберите тип расцветки:",
+                    reply_markup=color_types_keyboard(),
+                )
         return
 
     # Обработка выбора ширины
-    if callback_data.startswith("width_"):
-        width = callback_data[6:]  # Убираем префикс "width_"
+    if callback_data.startswith("width_") and not user_state.get("width"):
+        width = callback_data.replace("width_", "")
 
+        # Сохраняем ширину в БД
         try:
             with get_db_cursor() as cur:
                 cur.execute(
@@ -1054,20 +1085,48 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (width, user_id),
                 )
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения ширины пользователя {user_id}: {e}")
-            await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
+            logger.error(f"❌ Ошибка сохранения ширины для {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
             return
 
-        await query.edit_message_text(
-            f"📏 Ширина стропы: {width}\n\n📐 Выберите размер:",
-            reply_markup=sizes_keyboard(width),
+        # Получаем информацию о типе товара
+        try:
+            with get_db_cursor() as cur:
+                cur.execute(
+                    "SELECT product_type FROM user_states WHERE user_id = %s",
+                    (user_id,),
+                )
+                result = cur.fetchone()
+                product_type = result["product_type"] if result else None
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения типа товара для {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
+            return
+
+        # Проверяем, нужно ли выбирать размер для данного типа товара
+        ref_data = get_reference_data()
+        product_info = next(
+            (p for p in ref_data["product_types"] if p["type"] == product_type), None
         )
+
+        if product_info and product_info["has_size"]:
+            await query.edit_message_text(
+                "📐 Выберите размер:",
+                reply_markup=sizes_keyboard(width),
+            )
+        else:
+            # Если размер не нужен, переходим к выбору типа расцветки
+            await query.edit_message_text(
+                "🌈 Выберите тип расцветки:",
+                reply_markup=color_types_keyboard(),
+            )
         return
 
     # Обработка выбора размера
-    if callback_data.startswith("size_"):
-        size = callback_data[5:]  # Убираем префикс "size_"
+    if callback_data.startswith("size_") and not user_state.get("size"):
+        size = callback_data.replace("size_", "")
 
+        # Сохраняем размер в БД
         try:
             with get_db_cursor() as cur:
                 cur.execute(
@@ -1079,20 +1138,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (size, user_id),
                 )
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения размера пользователя {user_id}: {e}")
-            await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
+            logger.error(f"❌ Ошибка сохранения размера для {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
             return
 
         await query.edit_message_text(
-            f"📐 Размер: {size}\n\n🎨 Выберите тип расцветки:",
+            "🌈 Выберите тип расцветки:",
             reply_markup=color_types_keyboard(),
         )
         return
 
     # Обработка выбора типа расцветки
-    if callback_data.startswith("colortype_"):
-        color_type = callback_data[10:]  # Убираем префикс "colortype_"
+    if callback_data.startswith("colortype_") and not user_state.get("color_type"):
+        color_type = callback_data.replace("colortype_", "")
 
+        # Сохраняем тип расцветки в БД
         try:
             with get_db_cursor() as cur:
                 cur.execute(
@@ -1104,43 +1164,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (color_type, user_id),
                 )
         except Exception as e:
-            logger.error(
-                f"❌ Ошибка сохранения типа расцветки пользователя {user_id}: {e}"
-            )
-            await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
+            logger.error(f"❌ Ошибка сохранения типа расцветки для {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
             return
 
-        # Получаем информацию о товаре из состояния пользователя
-        try:
-            with get_db_cursor() as cur:
-                cur.execute(
-                    "SELECT product_type FROM user_states WHERE user_id = %s",
-                    (user_id,),
-                )
-                user_state = cur.fetchone()
-                product_type = user_state["product_type"] if user_state else None
-        except Exception as e:
-            logger.error(f"❌ Ошибка получения состояния пользователя {user_id}: {e}")
-            await query.edit_message_text("❌ Ошибка. Попробуйте снова.")
-            return
-
-        # Для Лежанки и Бус используем все расцветки
-        if product_type in ["Лежанка", "Бусы"]:
-            await query.edit_message_text(
-                f"🎨 Тип расцветки: {color_type}\n\n🌈 Выберите расцветку:",
-                reply_markup=all_colors_keyboard(),
-            )
-        else:
-            await query.edit_message_text(
-                f"🎨 Тип расцветки: {color_type}\n\n🌈 Выберите расцветку:",
-                reply_markup=colors_keyboard(color_type),
-            )
+        await query.edit_message_text(
+            "🎨 Выберите расцветку:",
+            reply_markup=colors_keyboard(color_type),
+        )
         return
 
     # Обработка выбора расцветки
-    if callback_data.startswith("color_"):
-        color = callback_data[6:]  # Убираем префикс "color_"
+    if callback_data.startswith("color_") and not user_state.get("color"):
+        color = callback_data.replace("color_", "")
 
+        # Сохраняем расцветку в БД
         try:
             with get_db_cursor() as cur:
                 cur.execute(
@@ -1152,20 +1190,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (color, user_id),
                 )
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения расцветки пользователя {user_id}: {e}")
-            await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
+            logger.error(f"❌ Ошибка сохранения расцветки для {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
             return
 
         await query.edit_message_text(
-            f"🌈 Расцветка: {color}\n\n💳 Выберите способ оплаты:",
+            "💳 Выберите способ оплаты:",
             reply_markup=payment_methods_keyboard(),
         )
         return
 
     # Обработка выбора способа оплаты
-    if callback_data.startswith("payment_"):
-        payment_method = callback_data[8:]  # Убираем префикс "payment_"
+    if callback_data.startswith("payment_") and not user_state.get("payment_method"):
+        payment_method = callback_data.replace("payment_", "")
 
+        # Сохраняем способ оплаты в БД
         try:
             with get_db_cursor() as cur:
                 cur.execute(
@@ -1177,169 +1216,142 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (payment_method, user_id),
                 )
         except Exception as e:
-            logger.error(
-                f"❌ Ошибка сохранения способа оплаты пользователя {user_id}: {e}"
-            )
-            await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
+            logger.error(f"❌ Ошибка сохранения способа оплаты для {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
             return
 
-        # Получаем все данные пользователя для расчета цены
+        # Получаем все данные пользователя
         try:
             with get_db_cursor() as cur:
                 cur.execute(
                     "SELECT * FROM user_states WHERE user_id = %s",
                     (user_id,),
                 )
-                user_state = cur.fetchone()
+                user_data = cur.fetchone()
         except Exception as e:
-            logger.error(f"❌ Ошибка получения состояния пользователя {user_id}: {e}")
-            await query.edit_message_text("❌ Ошибка. Попробуйте снова.")
+            logger.error(f"❌ Ошибка получения данных пользователя {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
             return
 
-        if user_state:
-            # Рассчитываем цену
-            price = get_product_price_from_catalog(
-                user_state["product_type"],
-                user_state["width"],
-                user_state["size"],
-                user_state["color_type"],
-                user_state["color"],
-            )
+        if not user_data:
+            await query.edit_message_text("❌ Данные не найдены. Попробуйте снова /add")
+            return
 
-            # Сохраняем цену в контексте для использования в следующем шаге
-            context.user_data["current_price"] = price
+        # Ищем цену в каталоге
+        price = get_product_price_from_catalog(
+            user_data["product_type"],
+            user_data["width"],
+            user_data["size"],
+            user_data["color_type"],
+            user_data["color"],
+        )
 
-            await query.edit_message_text(
-                f"💳 Способ оплаты: {payment_method}\n\n"
-                f"💰 Цена за единицу: {price:,.2f} руб.\n\n"
-                f"🔢 Введите количество товара:"
-            )
-        return
+        # Запрашиваем количество
+        context.user_data["price"] = price
+        context.user_data["user_data"] = user_data
 
-    # Обработка выбора типа отчета
-    if callback_data.startswith("report_"):
-        report_type = callback_data[7:]  # Убираем префикс "report_"
-
-        sales_data = get_sales_data()
-
-        if report_type == "channels":
-            report_text = generate_channel_report(sales_data)
-        elif report_type == "products":
-            report_text = generate_product_report(sales_data)
-        else:
-            report_text = "❌ Неизвестный тип отчета"
-
-        await query.edit_message_text(report_text, parse_mode="Markdown")
+        await query.edit_message_text(
+            f"💰 Цена товара: {price:,.2f} руб.\n\n"
+            f"🔢 Введите количество товаров (целое число):"
+        )
         return
 
 
 # ==================== ОБРАБОТЧИКИ СООБЩЕНИЙ ====================
-async def handle_quantity_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ввода количества товара"""
+async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ввода количества товаров"""
     user_id = update.message.from_user.id
-    quantity_text = update.message.text
 
-    # Проверяем, что введено число
     try:
-        quantity = int(quantity_text)
+        quantity = int(update.message.text.strip())
         if quantity <= 0:
-            await update.message.reply_text("❌ Количество должно быть больше 0.")
+            await update.message.reply_text(
+                "❌ Количество должно быть положительным числом. Попробуйте снова:"
+            )
             return
     except ValueError:
-        await update.message.reply_text("❌ Пожалуйста, введите целое число.")
+        await update.message.reply_text(
+            "❌ Пожалуйста, введите целое число. Попробуйте снова:"
+        )
         return
 
-    # Получаем данные пользователя из БД
+    # Получаем данные из контекста
+    price = context.user_data.get("price", 0)
+    user_data = context.user_data.get("user_data", {})
+
+    # Вычисляем общую сумму
+    total_amount = price * quantity
+
+    # Формируем данные для записи
+    record_data = [
+        user_data["channel"],  # Канал продаж
+        user_data["product_type"],  # Тип товара
+        user_data["width"] or "",  # Ширина
+        user_data["size"] or "",  # Размер
+        user_data["color_type"] or "",  # Тип расцветки
+        user_data["color"],  # Расцветка
+        str(quantity),  # Количество
+        f"{price:,.2f}",  # Цена
+        f"{total_amount:,.2f}",  # Общая сумма
+        user_data["payment_method"],  # Способ оплаты
+        datetime.now().strftime("%d.%m.%Y"),  # Дата
+    ]
+
+    # Записываем в Google Таблицу
+    try:
+        sheet = get_google_sheet_cached()
+        sheet.append_row(record_data)
+        logger.info(f"✅ Запись добавлена в Google Таблицу: {record_data}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка записи в Google Таблицу: {e}")
+        await update.message.reply_text("❌ Ошибка записи данных. Попробуйте снова.")
+        return
+
+    # Очищаем состояние пользователя в БД
     try:
         with get_db_cursor() as cur:
             cur.execute(
-                "SELECT * FROM user_states WHERE user_id = %s",
+                "DELETE FROM user_states WHERE user_id = %s",
                 (user_id,),
             )
-            user_state = cur.fetchone()
     except Exception as e:
-        logger.error(f"❌ Ошибка получения состояния пользователя {user_id}: {e}")
-        await update.message.reply_text("❌ Ошибка. Попробуйте снова с команды /add.")
-        return
+        logger.error(f"❌ Ошибка очистки состояния пользователя {user_id}: {e}")
 
-    if not user_state:
-        await update.message.reply_text("❌ Данные не найдены. Начните с команды /add.")
-        return
+    # Формируем сообщение с итогами
+    summary_message = (
+        f"✅ *Продажа добавлена!*\n\n"
+        f"📺 Канал: {user_data['channel']}\n"
+        f"🏷️ Товар: {user_data['product_type']}\n"
+    )
 
-    # Получаем цену из контекста
-    price = context.user_data.get("current_price", 0)
-    total_amount = price * quantity
+    if user_data["width"]:
+        summary_message += f"📏 Ширина: {user_data['width']}\n"
+    if user_data["size"]:
+        summary_message += f"📐 Размер: {user_data['size']}\n"
+    if user_data["color_type"]:
+        summary_message += f"🌈 Тип расцветки: {user_data['color_type']}\n"
 
-    # Записываем данные в Google Таблицу
-    try:
-        sheet = get_google_sheet_cached()
-        current_date = datetime.now().strftime("%d.%m.%Y")
+    summary_message += (
+        f"🎨 Расцветка: {user_data['color']}\n"
+        f"🔢 Количество: {quantity} шт.\n"
+        f"💰 Цена: {price:,.2f} руб.\n"
+        f"💵 Сумма: {total_amount:,.2f} руб.\n"
+        f"💳 Оплата: {user_data['payment_method']}\n"
+        f"📅 Дата: {datetime.now().strftime('%d.%m.%Y')}"
+    )
 
-        # Подготавливаем данные для записи
-        row_data = [
-            user_state["channel"],
-            user_state["product_type"],
-            user_state["width"] if user_state["width"] else "",
-            user_state["size"] if user_state["size"] else "",
-            user_state["color_type"],
-            user_state["color"],
-            quantity,
-            price,
-            total_amount,
-            user_state["payment_method"],
-            current_date,
-        ]
-
-        # Добавляем новую строку
-        sheet.append_row(row_data)
-
-        logger.info(f"✅ Данные записаны в Google Таблицу: {row_data}")
-
-        # Формируем сообщение об успехе
-        success_message = f"""
-✅ *Запись успешно добавлена!*
-
-• Канал продаж: {user_state['channel']}
-• Товар: {user_state['product_type']}
-• Ширина: {user_state['width'] if user_state['width'] else 'Не указана'}
-• Размер: {user_state['size'] if user_state['size'] else 'Не указан'}
-• Тип расцветки: {user_state['color_type']}
-• Расцветка: {user_state['color']}
-• Способ оплаты: {user_state['payment_method']}
-• Количество: {quantity} шт.
-• Цена за единицу: {price:,.2f} руб.
-• Общая сумма: {total_amount:,.2f} руб.
-• Дата: {current_date}
-"""
-
-        await update.message.reply_text(success_message, parse_mode="Markdown")
-
-        # Очищаем состояние пользователя
-        try:
-            with get_db_cursor() as cur:
-                cur.execute(
-                    "DELETE FROM user_states WHERE user_id = %s",
-                    (user_id,),
-                )
-        except Exception as e:
-            logger.error(f"❌ Ошибка очистки состояния пользователя {user_id}: {e}")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка записи в Google Таблицу: {e}")
-        await update.message.reply_text(
-            "❌ Ошибка записи данных. Попробуйте снова с команды /add."
-        )
+    await update.message.reply_text(summary_message, parse_mode="Markdown")
 
 
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
 def main():
-    """Основная функция бота"""
+    """Основная функция запуска бота"""
     logger.info("🚀 Запуск бота...")
 
     # Инициализация БД
     init_db()
 
-    # Создаем Application
+    # Создаем приложение
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Добавляем обработчики команд
@@ -1347,17 +1359,17 @@ def main():
     application.add_handler(CommandHandler("add", add_entry))
     application.add_handler(CommandHandler("report", generate_report))
 
-    # Добавляем обработчики callback-запросов
-    application.add_handler(CallbackQueryHandler(handle_callback))
+    # Добавляем обработчики callback запросов
+    application.add_handler(CallbackQueryHandler(handle_callback_query))
 
-    # Добавляем обработчик текстовых сообщений (для ввода количества)
+    # Добавляем обработчик сообщений (для ввода количества)
     application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quantity_input)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quantity)
     )
 
     # Запускаем бота
-    logger.info("✅ Бот запущен и готов к работе!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("🤖 Бот запущен и готов к работе!")
 
 
 if __name__ == "__main__":
