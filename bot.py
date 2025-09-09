@@ -1004,7 +1004,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         # Запрашиваем тип товара
         await query.edit_message_text(
-            "🏷️ Выберите тип товара:",
+            "• Выберите тип товара:",
             reply_markup=product_types_keyboard(),
         )
         return
@@ -1043,7 +1043,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if product_type in ["Лежанка", "Бусы"]:
             # Пропускаем выбор ширины и размера, переходим сразу к выбору расцветки
             await query.edit_message_text(
-                "🎨 Выберите расцветку:",
+                "• Выберите расцветку:",
                 reply_markup=all_colors_keyboard(),
             )
             return
@@ -1051,20 +1051,20 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         # Проверяем, нужно ли выбирать ширину
         if product_info["has_width"]:
             await query.edit_message_text(
-                "📏 Выберите ширину строп:",
+                "• Выберите ширину строп:",
                 reply_markup=widths_keyboard(),
             )
         else:
             # Если ширина не нужна, пропускаем к выбору размера или расцветки
             if product_info["has_size"]:
                 await query.edit_message_text(
-                    "📐 Выберите размер:",
+                    "• Выберите размер:",
                     reply_markup=sizes_keyboard(""),
                 )
             else:
                 # Если размер тоже не нужен, переходим к выбору типа расцветки
                 await query.edit_message_text(
-                    "🌈 Выберите тип расцветки:",
+                    "• Выберите тип расцветки:",
                     reply_markup=color_types_keyboard(),
                 )
         return
@@ -1111,13 +1111,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         if product_info and product_info["has_size"]:
             await query.edit_message_text(
-                "📐 Выберите размер:",
+                "• Выберите размер:",
                 reply_markup=sizes_keyboard(width),
             )
         else:
             # Если размер не нужен, переходим к выбору типа расцветки
             await query.edit_message_text(
-                "🌈 Выберите тип расцветки:",
+                "• Выберите тип расцветки:",
                 reply_markup=color_types_keyboard(),
             )
         return
@@ -1143,7 +1143,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         await query.edit_message_text(
-            "🌈 Выберите тип расцветки:",
+            "• Выберите тип расцветки:",
             reply_markup=color_types_keyboard(),
         )
         return
@@ -1169,7 +1169,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         await query.edit_message_text(
-            "🎨 Выберите расцветку:",
+            "• Выберите расцветку:",
             reply_markup=colors_keyboard(color_type),
         )
         return
@@ -1251,8 +1251,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data["user_data"] = user_data
 
         await query.edit_message_text(
-            f"💰 Цена товара: {price:,.2f} руб.\n\n"
-            f"🔢 Введите количество товаров (целое число):"
+            f"• Цена товара: {price:,.2f} руб.\n\n"
+            f"• Введите количество товаров (целое число):"
         )
         return
 
@@ -1320,24 +1320,24 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Формируем сообщение с итогами
     summary_message = (
         f"✅ *Продажа добавлена!*\n\n"
-        f"📺 Канал: {user_data['channel']}\n"
-        f"🏷️ Товар: {user_data['product_type']}\n"
+        f"• Канал: {user_data['channel']}\n"
+        f"• Товар: {user_data['product_type']}\n"
     )
 
     if user_data["width"]:
-        summary_message += f"📏 Ширина: {user_data['width']}\n"
+        summary_message += f"• Ширина: {user_data['width']}\n"
     if user_data["size"]:
-        summary_message += f"📐 Размер: {user_data['size']}\n"
+        summary_message += f"• Размер: {user_data['size']}\n"
     if user_data["color_type"]:
-        summary_message += f"🌈 Тип расцветки: {user_data['color_type']}\n"
+        summary_message += f"• Тип расцветки: {user_data['color_type']}\n"
 
     summary_message += (
-        f"🎨 Расцветка: {user_data['color']}\n"
-        f"🔢 Количество: {quantity} шт.\n"
-        f"💰 Цена: {price:,.2f} руб.\n"
-        f"💵 Сумма: {total_amount:,.2f} руб.\n"
-        f"💳 Оплата: {user_data['payment_method']}\n"
-        f"📅 Дата: {datetime.now().strftime('%d.%m.%Y')}"
+        f"• Расцветка: {user_data['color']}\n"
+        f"• Количество: {quantity} шт.\n"
+        f"• Цена: {price:,.2f} руб.\n"
+        f"• Сумма: {total_amount:,.2f} руб.\n"
+        f"• Оплата: {user_data['payment_method']}\n"
+        f"• Дата: {datetime.now().strftime('%d.%m.%Y')}"
     )
 
     await update.message.reply_text(summary_message, parse_mode="Markdown")
