@@ -508,25 +508,29 @@ def get_sales_data():
     try:
         sheet = get_google_sheet_cached()
         all_data = sheet.get_all_values()
-        
+
         # Пропускаем заголовок
         sales_data = []
         for row in all_data[1:]:
             if len(row) >= 11:  # Проверяем, что строка содержит все необходимые колонки
-                sales_data.append({
-                    'channel': row[0],
-                    'product_type': row[1],
-                    'width': row[2],
-                    'size': row[3],
-                    'color_type': row[4],
-                    'color': row[5],
-                    'quantity': int(row[6]) if row[6] and row[6].isdigit() else 0,
-                    'price': float(clean_numeric_value(row[7])) if row[7] else 0,
-                    'total_amount': float(clean_numeric_value(row[8])) if row[8] else 0,
-                    'payment_method': row[9],
-                    'date': row[10]
-                })
-        
+                sales_data.append(
+                    {
+                        "channel": row[0],
+                        "product_type": row[1],
+                        "width": row[2],
+                        "size": row[3],
+                        "color_type": row[4],
+                        "color": row[5],
+                        "quantity": int(row[6]) if row[6] and row[6].isdigit() else 0,
+                        "price": float(clean_numeric_value(row[7])) if row[7] else 0,
+                        "total_amount": (
+                            float(clean_numeric_value(row[8])) if row[8] else 0
+                        ),
+                        "payment_method": row[9],
+                        "date": row[10],
+                    }
+                )
+
         return sales_data
     except Exception as e:
         logger.error(f"❌ Ошибка получения данных о продажах: {e}")
@@ -539,35 +543,35 @@ def generate_channel_report(sales_data, period_days=30):
         # Фильтруем данные по периоду
         cutoff_date = datetime.now() - timedelta(days=period_days)
         filtered_data = [
-            sale for sale in sales_data 
-            if sale['date'] and datetime.strptime(sale['date'], '%d.%m.%Y') >= cutoff_date
+            sale
+            for sale in sales_data
+            if sale["date"]
+            and datetime.strptime(sale["date"], "%d.%m.%Y") >= cutoff_date
         ]
-        
+
         # Группируем по каналам
         channel_stats = {}
         for sale in filtered_data:
-            channel = sale['channel']
+            channel = sale["channel"]
             if channel not in channel_stats:
                 channel_stats[channel] = {
-                    'total_sales': 0,
-                    'total_amount': 0,
-                    'count': 0
+                    "total_sales": 0,
+                    "total_amount": 0,
+                    "count": 0,
                 }
-            
-            channel_stats[channel]['total_sales'] += sale['quantity']
-            channel_stats[channel]['total_amount'] += sale['total_amount']
-            channel_stats[channel]['count'] += 1
-        
+
+            channel_stats[channel]["total_sales"] += sale["quantity"]
+            channel_stats[channel]["total_amount"] += sale["total_amount"]
+            channel_stats[channel]["count"] += 1
+
         # Формируем отчет
         report_lines = [f"📊 *ОТЧЕТ ПО КАНАЛАМ ПРОДАЖ (за {period_days} дней)*\n"]
-        
+
         # Сортируем по убыванию общей суммы
         sorted_channels = sorted(
-            channel_stats.items(), 
-            key=lambda x: x[1]['total_amount'], 
-            reverse=True
+            channel_stats.items(), key=lambda x: x[1]["total_amount"], reverse=True
         )
-        
+
         for channel, stats in sorted_channels:
             report_lines.append(
                 f"\n📈 *{channel}:*\n"
@@ -576,22 +580,24 @@ def generate_channel_report(sales_data, period_days=30):
                 f"   • Сумма: {stats['total_amount']:,.2f} руб.\n"
                 f"   • Средний чек: {stats['total_amount']/stats['count']:,.2f} руб."
             )
-        
+
         # Итоги
-        total_sales = sum(stats['total_sales'] for stats in channel_stats.values())
-        total_amount = sum(stats['total_amount'] for stats in channel_stats.values())
-        total_count = sum(stats['count'] for stats in channel_stats.values())
-        
+        total_sales = sum(stats["total_sales"] for stats in channel_stats.values())
+        total_amount = sum(stats["total_amount"] for stats in channel_stats.values())
+        total_count = sum(stats["count"] for stats in channel_stats.values())
+
         report_lines.append(
             f"\n💰 *ИТОГО:*\n"
             f"   • Всего продаж: {total_count}\n"
             f"   • Всего товаров: {total_sales} шт.\n"
             f"   • Общая сумма: {total_amount:,.2f} руб.\n"
-            f"   • Средний чек: {total_amount/total_count:,.2f} руб." if total_count > 0 else "   • Средний чек: 0 руб."
+            f"   • Средний чек: {total_amount/total_count:,.2f} руб."
+            if total_count > 0
+            else "   • Средний чек: 0 руб."
         )
-        
+
         return "\n".join(report_lines)
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка генерации отчета по каналам: {e}")
         return "❌ Ошибка генерации отчета"
@@ -603,59 +609,63 @@ def generate_product_report(sales_data, period_days=30):
         # Фильтруем данные по периоду
         cutoff_date = datetime.now() - timedelta(days=period_days)
         filtered_data = [
-            sale for sale in sales_data 
-            if sale['date'] and datetime.strptime(sale['date'], '%d.%m.%Y') >= cutoff_date
+            sale
+            for sale in sales_data
+            if sale["date"]
+            and datetime.strptime(sale["date"], "%d.%m.%Y") >= cutoff_date
         ]
-        
+
         # Группируем по типам товаров
         product_stats = {}
         for sale in filtered_data:
-            product_type = sale['product_type']
+            product_type = sale["product_type"]
             if product_type not in product_stats:
                 product_stats[product_type] = {
-                    'total_sales': 0,
-                    'total_amount': 0,
-                    'count': 0
+                    "total_sales": 0,
+                    "total_amount": 0,
+                    "count": 0,
                 }
-            
-            product_stats[product_type]['total_sales'] += sale['quantity']
-            product_stats[product_type]['total_amount'] += sale['total_amount']
-            product_stats[product_type]['count'] += 1
-        
+
+            product_stats[product_type]["total_sales"] += sale["quantity"]
+            product_stats[product_type]["total_amount"] += sale["total_amount"]
+            product_stats[product_type]["count"] += 1
+
         # Формируем отчет
         report_lines = [f"📦 *ОТЧЕТ ПО ТИПАМ ТОВАРОВ (за {period_days} дней)*\n"]
-        
+
         # Сортируем по убыванию общей суммы
         sorted_products = sorted(
-            product_stats.items(), 
-            key=lambda x: x[1]['total_amount'], 
-            reverse=True
+            product_stats.items(), key=lambda x: x[1]["total_amount"], reverse=True
         )
-        
+
         for product_type, stats in sorted_products:
             report_lines.append(
                 f"\n🏷️ *{product_type}:*\n"
                 f"   • Продаж: {stats['count']}\n"
                 f"   • Товаров: {stats['total_sales']} шт.\n"
                 f"   • Сумма: {stats['total_amount']:,.2f} руб.\n"
-                f"   • Средняя цена: {stats['total_amount']/stats['total_sales']:,.2f} руб." if stats['total_sales'] > 0 else "   • Средняя цена: 0 руб."
+                f"   • Средняя цена: {stats['total_amount']/stats['total_sales']:,.2f} руб."
+                if stats["total_sales"] > 0
+                else "   • Средняя цена: 0 руб."
             )
-        
+
         # Итоги
-        total_sales = sum(stats['total_sales'] for stats in product_stats.values())
-        total_amount = sum(stats['total_amount'] for stats in product_stats.values())
-        total_count = sum(stats['count'] for stats in product_stats.values())
-        
+        total_sales = sum(stats["total_sales"] for stats in product_stats.values())
+        total_amount = sum(stats["total_amount"] for stats in product_stats.values())
+        total_count = sum(stats["count"] for stats in product_stats.values())
+
         report_lines.append(
             f"\n💰 *ИТОГО:*\n"
             f"   • Всего продаж: {total_count}\n"
             f"   • Всего товаров: {total_sales} шт.\n"
             f"   • Общая сумма: {total_amount:,.2f} руб.\n"
-            f"   • Средний чек: {total_amount/total_count:,.2f} руб." if total_count > 0 else "   • Средний чек: 0 руб."
+            f"   • Средний чек: {total_amount/total_count:,.2f} руб."
+            if total_count > 0
+            else "   • Средний чек: 0 руб."
         )
-        
+
         return "\n".join(report_lines)
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка генерации отчета по товарам: {e}")
         return "❌ Ошибка генерации отчета"
@@ -866,7 +876,7 @@ def payment_methods_keyboard():
             [InlineKeyboardButton("ИП", callback_data="payment_ИП")],
             [InlineKeyboardButton("Перевод", callback_data="payment_Перевод")],
             [InlineKeyboardButton("Наличные", callback_data="payment_Наличные")],
-            [InlineKeyboardButton("❌ Отмена", callback_data="cancel")]
+            [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
         ]
         return InlineKeyboardMarkup(keyboard)
 
@@ -876,7 +886,7 @@ def report_types_keyboard():
     keyboard = [
         [InlineKeyboardButton("📊 По каналам продаж", callback_data="report_channels")],
         [InlineKeyboardButton("📦 По типам товаров", callback_data="report_products")],
-        [InlineKeyboardButton("❌ Отмена", callback_data="cancel")]
+        [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -949,7 +959,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Обработка выбора канала продаж
-    if not callback_data.startswith(("type_", "width_", "size_", "colortype_", "color_", "payment_", "report_")):
+    if not callback_data.startswith(
+        ("type_", "width_", "size_", "colortype_", "color_", "payment_", "report_")
+    ):
         try:
             with get_db_cursor() as cur:
                 cur.execute(
@@ -987,7 +999,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (product_type, user_id),
                 )
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения типа товара пользователя {user_id}: {e}")
+            logger.error(
+                f"❌ Ошибка сохранения типа товара пользователя {user_id}: {e}"
+            )
             await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
             return
 
@@ -1015,7 +1029,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         (user_id,),
                     )
             except Exception as e:
-                logger.error(f"❌ Ошибка обновления состояния пользователя {user_id}: {e}")
+                logger.error(
+                    f"❌ Ошибка обновления состояния пользователя {user_id}: {e}"
+                )
 
             await query.edit_message_text(
                 f"🏷️ Тип товара: {product_type}\n\n🎨 Выберите тип расцветки:",
@@ -1088,7 +1104,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (color_type, user_id),
                 )
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения типа расцветки пользователя {user_id}: {e}")
+            logger.error(
+                f"❌ Ошибка сохранения типа расцветки пользователя {user_id}: {e}"
+            )
             await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
             return
 
@@ -1159,7 +1177,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (payment_method, user_id),
                 )
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения способа оплаты пользователя {user_id}: {e}")
+            logger.error(
+                f"❌ Ошибка сохранения способа оплаты пользователя {user_id}: {e}"
+            )
             await query.edit_message_text("❌ Ошибка сохранения. Попробуйте снова.")
             return
 
@@ -1199,16 +1219,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Обработка выбора типа отчета
     if callback_data.startswith("report_"):
         report_type = callback_data[7:]  # Убираем префикс "report_"
-        
+
         sales_data = get_sales_data()
-        
+
         if report_type == "channels":
             report_text = generate_channel_report(sales_data)
         elif report_type == "products":
             report_text = generate_product_report(sales_data)
         else:
             report_text = "❌ Неизвестный тип отчета"
-        
+
         await query.edit_message_text(report_text, parse_mode="Markdown")
         return
 
@@ -1263,9 +1283,9 @@ async def handle_quantity_input(update: Update, context: ContextTypes.DEFAULT_TY
             user_state["size"] if user_state["size"] else "",
             user_state["color_type"],
             user_state["color"],
-            str(quantity),
-            str(price),
-            str(total_amount),
+            quantity,
+            price,
+            total_amount,
             user_state["payment_method"],
             current_date,
         ]
@@ -1279,17 +1299,17 @@ async def handle_quantity_input(update: Update, context: ContextTypes.DEFAULT_TY
         success_message = f"""
 ✅ *Запись успешно добавлена!*
 
-📊 Канал продаж: {user_state['channel']}
-🏷️ Товар: {user_state['product_type']}
-📏 Ширина: {user_state['width'] if user_state['width'] else 'Не указана'}
-📐 Размер: {user_state['size'] if user_state['size'] else 'Не указан'}
-🎨 Тип расцветки: {user_state['color_type']}
-🌈 Расцветка: {user_state['color']}
-💳 Способ оплаты: {user_state['payment_method']}
-🔢 Количество: {quantity} шт.
-💰 Цена за единицу: {price:,.2f} руб.
-💵 Общая сумма: {total_amount:,.2f} руб.
-📅 Дата: {current_date}
+• Канал продаж: {user_state['channel']}
+• Товар: {user_state['product_type']}
+• Ширина: {user_state['width'] if user_state['width'] else 'Не указана'}
+• Размер: {user_state['size'] if user_state['size'] else 'Не указан'}
+• Тип расцветки: {user_state['color_type']}
+• Расцветка: {user_state['color']}
+• Способ оплаты: {user_state['payment_method']}
+• Количество: {quantity} шт.
+• Цена за единицу: {price:,.2f} руб.
+• Общая сумма: {total_amount:,.2f} руб.
+• Дата: {current_date}
 """
 
         await update.message.reply_text(success_message, parse_mode="Markdown")
