@@ -1290,9 +1290,9 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data["size"] or "",  # Размер
         user_data["color_type"] or "",  # Тип расцветки
         user_data["color"],  # Расцветка
-        str(quantity),  # Количество
-        f"{price:,.2f}",  # Цена
-        f"{total_amount:,.2f}",  # Общая сумма
+        quantity,  # Количество
+        price,  # Цена
+        total_amount,  # Общая сумма
         user_data["payment_method"],  # Способ оплаты
         datetime.now().strftime("%d.%m.%Y"),  # Дата
     ]
