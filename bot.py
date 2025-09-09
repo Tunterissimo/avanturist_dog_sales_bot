@@ -1294,7 +1294,7 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price,  # Цена
         total_amount,  # Общая сумма
         user_data["payment_method"],  # Способ оплаты
-        datetime.now().strftime("%Y-%m-%d"),  # Дата
+        datetime.now().time("%d.%m.%Y"),  # Дата
     ]
 
     # Записываем в Google Таблицу
