@@ -1084,11 +1084,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         # Проверяем тип товара для пропуска этапов
         if product_type in ["Лежанка", "Бусы"]:
-            # Пропускаем выбор ширины и размера, переходим сразу к выбору расцветки
+            # Пропускаем выбор ширины и размера, переходим сразу к выбору типа расцветки
             await query.edit_message_text(
-                "• Выберите расцветку:",
-                reply_markup=all_colors_keyboard(),
-            )
+                "• Выберите тип расцветки:",
+                reply_markup=color_types_keyboard(),
+                )
             return
 
         # Проверяем, нужно ли выбирать ширину
