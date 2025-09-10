@@ -889,6 +889,8 @@ def payment_methods_keyboard():
                 [InlineKeyboardButton(method, callback_data=f"payment_{method}")]
             )
 
+        # Добавляем кнопку для ручного ввода цены
+        keyboard.append([InlineKeyboardButton("✏️ Ввести цену вручную", callback_data="manual_price")])
         keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
         return InlineKeyboardMarkup(keyboard)
 
@@ -899,6 +901,7 @@ def payment_methods_keyboard():
             [InlineKeyboardButton("ИП", callback_data="payment_ИП")],
             [InlineKeyboardButton("Перевод", callback_data="payment_Перевод")],
             [InlineKeyboardButton("Наличные", callback_data="payment_Наличные")],
+            [InlineKeyboardButton("✏️ Ввести цену вручную", callback_data="manual_price")],
             [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -1261,6 +1264,48 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=payment_methods_keyboard(),
         )
         return
+    
+    # Обработка ручного ввода цены
+    if callback_data == "manual_price" and not user_state.get("payment_method"):
+        # Сохраняем флаг ручного ввода в контексте
+        context.user_data["manual_price_input"] = True
+        
+        # Получаем все данные пользователя
+        try:
+            with get_db_cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM user_states WHERE user_id = %s",
+                    (user_id,),
+                )
+                user_data = cur.fetchone()
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения данных пользователя {user_id}: {e}")
+            await query.edit_message_text("❌ Ошибка. Попробуйте снова /add")
+            return
+
+        if not user_data:
+            await query.edit_message_text("❌ Данные не найдены. Попробуйте снова /add")
+            return
+
+        # Ищем цену в каталоге для отображения
+        price = get_product_price_from_catalog(
+            user_data["product_type"],
+            user_data["width"],
+            user_data["size"],
+            user_data["length"],
+            user_data["color_type"],
+            user_data["color"],
+        )
+
+        # Сохраняем данные в контексте
+        context.user_data["user_data"] = user_data
+        context.user_data["auto_price"] = price  # Сохраняем автоматическую цену
+
+        await query.edit_message_text(
+            f"• Автоматическая цена: {price:,.2f} руб.\n\n"
+            f"• Введите новую цену вручную (число, например: 1500.50):"
+        )
+        return
 
     # Обработка выбора способа оплаты
     if callback_data.startswith("payment_") and not user_state.get("payment_method"):
@@ -1323,6 +1368,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 # ==================== ОБРАБОТЧИКИ СООБЩЕНИЙ ====================
 async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ввода количества товаров"""
+    if context.user_data.get("manual_price_input"):
+        return
+    
     user_id = update.message.from_user.id
 
     try:
@@ -1339,7 +1387,7 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Получаем данные из контекста
-    price = context.user_data.get("price", 0)
+    price = context.user_data.get("manual_price") or context.user_data.get("price", 0)
     user_data = context.user_data.get("user_data", {})
 
     # Вычисляем общую сумму
@@ -1408,6 +1456,41 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(summary_message, parse_mode="Markdown")
 
+async def handle_manual_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ручного ввода цены"""
+    user_id = update.message.from_user.id
+
+    try:
+        manual_price = float(update.message.text.strip().replace(",", "."))
+        if manual_price <= 0:
+            await update.message.reply_text(
+                "❌ Цена должна быть положительным числом. Попробуйте снова:"
+            )
+            return
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Пожалуйста, введите число (например: 1500.50). Попробуйте снова:"
+        )
+        return
+
+    # Сохраняем ручную цену в контексте
+    context.user_data["manual_price"] = manual_price
+    context.user_data["manual_price_input"] = False  # Сбрасываем флаг
+
+    # Запрашиваем способ оплаты
+    await update.message.reply_text(
+        f"• Новая цена: {manual_price:,.2f} руб.\n\n"
+        f"💳 Выберите способ оплаты:",
+        reply_markup=payment_methods_keyboard(),
+    )
+
+async def handle_message_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Роутер для обработки текстовых сообщений"""
+    if context.user_data.get("manual_price_input"):
+        await handle_manual_price(update, context)
+    else:
+        await handle_quantity(update, context)
+
 # ==================== ОБРАБОТЧИК КОМАНДЫ ДЛЯ ОЧИСТКИ КЭША ====================
 
 async def clear_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1448,7 +1531,7 @@ def main():
 
     # Добавляем обработчик сообщений (для ввода количества)
     application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quantity)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message_input)
     )
 
     # Запускаем бота
