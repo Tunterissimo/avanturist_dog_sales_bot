@@ -368,7 +368,9 @@ def get_reference_data():
         return {}
 
 
-def get_product_price_from_catalog(product_type, width, size, length, color_type, color):
+def get_product_price_from_catalog(
+    product_type, width, size, length, color_type, color
+):
     """Находит цену товара в каталоге по параметрам"""
     try:
         sheet = get_google_sheet_cached()
@@ -877,7 +879,6 @@ def colors_keyboard(selected_color_type):
         )
 
 
-
 def payment_methods_keyboard():
     """Клавиатура со способами оплаты"""
     try:
@@ -890,7 +891,13 @@ def payment_methods_keyboard():
             )
 
         # Добавляем кнопку для ручного ввода цены
-        keyboard.append([InlineKeyboardButton("✏️ Ввести цену вручную", callback_data="manual_price")])
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    "✏️ Ввести цену вручную", callback_data="manual_price"
+                )
+            ]
+        )
         keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
         return InlineKeyboardMarkup(keyboard)
 
@@ -901,7 +908,11 @@ def payment_methods_keyboard():
             [InlineKeyboardButton("ИП", callback_data="payment_ИП")],
             [InlineKeyboardButton("Перевод", callback_data="payment_Перевод")],
             [InlineKeyboardButton("Наличные", callback_data="payment_Наличные")],
-            [InlineKeyboardButton("✏️ Ввести цену вручную", callback_data="manual_price")],
+            [
+                InlineKeyboardButton(
+                    "✏️ Ввести цену вручную", callback_data="manual_price"
+                )
+            ],
             [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -957,6 +968,7 @@ async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📊 Выберите тип отчета:",
         reply_markup=report_types_keyboard(),
     )
+
 
 # ==================== ОБРАБОТЧИКИ КНОПОК ====================
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1070,7 +1082,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(
                 "• Выберите тип расцветки:",
                 reply_markup=color_types_keyboard(),
-                )
+            )
             return
 
         # Проверяем, нужно ли выбирать ширину
@@ -1264,12 +1276,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=payment_methods_keyboard(),
         )
         return
-    
+
     # Обработка ручного ввода цены
     if callback_data == "manual_price" and not user_state.get("payment_method"):
         # Сохраняем флаг ручного ввода в контексте
         context.user_data["manual_price_input"] = True
-        
+
         # Получаем все данные пользователя
         try:
             with get_db_cursor() as cur:
@@ -1358,10 +1370,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data["price"] = price
         context.user_data["user_data"] = user_data
 
-        await query.edit_message_text(
-            f"• Цена товара: {price:,.2f} руб.\n\n"
-            f"• Введите количество товаров (целое число):"
-        )
+        await query.edit_message_text(f"• Введите количество товаров (целое число):")
         return
 
 
@@ -1370,7 +1379,7 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ввода количества товаров"""
     if context.user_data.get("manual_price_input"):
         return
-    
+
     user_id = update.message.from_user.id
 
     try:
@@ -1456,6 +1465,7 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(summary_message, parse_mode="Markdown")
 
+
 async def handle_manual_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ручного ввода цены"""
     user_id = update.message.from_user.id
@@ -1479,10 +1489,10 @@ async def handle_manual_price(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Запрашиваем способ оплаты
     await update.message.reply_text(
-        f"• Новая цена: {manual_price:,.2f} руб.\n\n"
-        f"💳 Выберите способ оплаты:",
+        f"• Новая цена: {manual_price:,.2f} руб.\n\n" f"💳 Выберите способ оплаты:",
         reply_markup=payment_methods_keyboard(),
     )
+
 
 async def handle_message_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Роутер для обработки текстовых сообщений"""
@@ -1491,7 +1501,9 @@ async def handle_message_input(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await handle_quantity(update, context)
 
+
 # ==================== ОБРАБОТЧИК КОМАНДЫ ДЛЯ ОЧИСТКИ КЭША ====================
+
 
 async def clear_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /clearcache для очистки кэша"""
@@ -1501,13 +1513,14 @@ async def clear_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
         get_channels_from_sheet.cache_clear()
         get_payment_methods_from_sheet.cache_clear()
         get_reference_data.cache_clear()
-        
+
         logger.info("🧹 Кэш успешно очищен")
         await update.message.reply_text("✅ Кэш успешно очищен!")
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка очистки кэша: {e}")
         await update.message.reply_text("❌ Ошибка при очистке кэша")
+
 
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
 def main():
