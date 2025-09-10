@@ -955,7 +955,6 @@ async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=report_types_keyboard(),
     )
 
-
 # ==================== ОБРАБОТЧИКИ КНОПОК ====================
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик всех callback запросов"""
@@ -1409,6 +1408,23 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(summary_message, parse_mode="Markdown")
 
+# ==================== ОБРАБОТЧИК КОМАНДЫ ДЛЯ ОЧИСТКИ КЭША ====================
+
+async def clear_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /clearcache для очистки кэша"""
+    try:
+        # Очищаем все кэшированные функции
+        get_google_sheet_cached.cache_clear()
+        get_channels_from_sheet.cache_clear()
+        get_payment_methods_from_sheet.cache_clear()
+        get_reference_data.cache_clear()
+        
+        logger.info("🧹 Кэш успешно очищен")
+        await update.message.reply_text("✅ Кэш успешно очищен!")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка очистки кэша: {e}")
+        await update.message.reply_text("❌ Ошибка при очистке кэша")
 
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
 def main():
@@ -1425,6 +1441,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("add", add_entry))
     application.add_handler(CommandHandler("report", generate_report))
+    application.add_handler(CommandHandler("clearcache", clear_cache))
 
     # Добавляем обработчики callback запросов
     application.add_handler(CallbackQueryHandler(handle_callback_query))
