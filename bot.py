@@ -877,26 +877,6 @@ def colors_keyboard(selected_color_type):
         )
 
 
-def all_colors_keyboard():
-    """Клавиатура со всеми расцветками (для товаров Лежанка и Бусы)"""
-    try:
-        ref_data = get_reference_data()
-        keyboard = []
-
-        for color in ref_data["colors"]:
-            keyboard.append(
-                [InlineKeyboardButton(color, callback_data=f"color_{color}")]
-            )
-
-        keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
-        return InlineKeyboardMarkup(keyboard)
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка создания клавиатуры всех расцветок: {e}")
-        return InlineKeyboardMarkup(
-            [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
-        )
-
 
 def payment_methods_keyboard():
     """Клавиатура со способами оплаты"""
