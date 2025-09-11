@@ -556,6 +556,35 @@ def get_sales_data():
         logger.error(f"❌ Ошибка получения данных о продажах: {e}")
         return []
 
+def get_expenses_data():
+    """Получает данные о расходах из Google Таблицы"""
+    try:
+        sheet = get_google_sheet_cached()
+        
+        try:
+            expenses_sheet = sheet.spreadsheet.worksheet(EXPENSES_SHEET_NAME)
+            all_data = expenses_sheet.get_all_values()
+        except Exception as e:
+            logger.error(f"❌ Лист '{EXPENSES_SHEET_NAME}' не найден: {e}")
+            return []
+
+        # Пропускаем заголовок
+        expenses_data = []
+        for row in all_data[1:]:
+            if len(row) >= 4:  # Проверяем, что строка содержит все необходимые колонки
+                expenses_data.append(
+                    {
+                        "category": row[0],
+                        "amount": float(clean_numeric_value(row[1])) if row[1] else 0,
+                        "date": row[2],
+                        "comment": row[3] if len(row) > 3 else ""
+                    }
+                )
+
+        return expenses_data
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения данных о расходах: {e}")
+        return []
 
 def generate_channel_report(sales_data, period_days=30):
     """Генерирует отчет по каналам продаж"""
@@ -689,7 +718,69 @@ def generate_product_report(sales_data, period_days=30):
     except Exception as e:
         logger.error(f"❌ Ошибка генерации отчета по товарам: {e}")
         return "❌ Ошибка генерации отчета"
-    
+
+def generate_expenses_report(expenses_data, period_days=30):
+    """Генерирует отчет по расходам"""
+    try:
+        # Фильтруем данные по периоду
+        cutoff_date = datetime.now() - timedelta(days=period_days)
+        filtered_data = [
+            expense
+            for expense in expenses_data
+            if expense["date"]
+            and datetime.strptime(expense["date"], "%d.%m.%Y") >= cutoff_date
+        ]
+
+        # Группируем по категориям
+        category_stats = {}
+        for expense in filtered_data:
+            category = expense["category"]
+            if category not in category_stats:
+                category_stats[category] = {
+                    "total_amount": 0,
+                    "count": 0,
+                }
+
+            category_stats[category]["total_amount"] += expense["amount"]
+            category_stats[category]["count"] += 1
+
+        # Формируем отчет
+        report_lines = [f"💰 *ОТЧЕТ ПО РАСХОДАМ (за {period_days} дней)*\n"]
+
+        # Сортируем по убыванию общей суммы
+        sorted_categories = sorted(
+            category_stats.items(), key=lambda x: x[1]["total_amount"], reverse=True
+        )
+
+        for category, stats in sorted_categories:
+            report_lines.append(
+                f"\n📊 *{category}:*\n"
+                f"   • Количество: {stats['count']}\n"
+                f"   • Сумма: {stats['total_amount']:,.2f} руб.\n"
+                f"   • Средний расход: {stats['total_amount']/stats['count']:,.2f} руб."
+                if stats["count"] > 0
+                else "   • Средний расход: 0 руб."
+            )
+
+        # Итоги
+        total_amount = sum(stats["total_amount"] for stats in category_stats.values())
+        total_count = sum(stats["count"] for stats in category_stats.values())
+
+        report_lines.append(
+            f"\n💸 *ИТОГО:*\n"
+            f"   • Всего расходов: {total_count}\n"
+            f"   • Общая сумма: {total_amount:,.2f} руб.\n"
+            f"   • Средний расход: {total_amount/total_count:,.2f} руб."
+            if total_count > 0
+            else "   • Средний расход: 0 руб."
+        )
+
+        return "\n".join(report_lines)
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка генерации отчета по расходам: {e}")
+        return "❌ Ошибка генерации отчета по расходам"
+
 @lru_cache(maxsize=1)
 def get_expense_categories_from_sheet():
     """Загружает список категорий расходов из Google Таблицы с кешированием"""
@@ -958,6 +1049,7 @@ def report_types_keyboard():
     keyboard = [
         [InlineKeyboardButton("📊 По каналам продаж", callback_data="report_channels")],
         [InlineKeyboardButton("📦 По типам товаров", callback_data="report_products")],
+        [InlineKeyboardButton("💰 По расходам", callback_data="report_expenses")],
         [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -1078,6 +1170,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if callback_data == "report_products":
         sales_data = get_sales_data()
         report = generate_product_report(sales_data)
+        await query.edit_message_text(report, parse_mode="Markdown")
+        return
+    
+    if callback_data == "report_expenses":
+        expenses_data = get_expenses_data()
+        report = generate_expenses_report(expenses_data)
         await query.edit_message_text(report, parse_mode="Markdown")
         return
     
