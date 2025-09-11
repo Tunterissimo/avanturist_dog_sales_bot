@@ -38,6 +38,8 @@ CATALOG_SHEET_NAME = "Каталог товаров"
 CHANNELS_SHEET_NAME = "Каналы"
 REFERENCE_SHEET_NAME = "Справочники"
 PAYMENT_METHODS_SHEET_NAME = "Способы оплаты"
+EXPENSES_SHEET_NAME = "Расходы"
+EXPENSE_CATEGORIES_SHEET_NAME = "Категории расходов"
 
 # Константы для справочников
 PRODUCT_TYPES_HEADER = "ТИПЫ ТОВАРОВ"
@@ -687,6 +689,39 @@ def generate_product_report(sales_data, period_days=30):
     except Exception as e:
         logger.error(f"❌ Ошибка генерации отчета по товарам: {e}")
         return "❌ Ошибка генерации отчета"
+    
+@lru_cache(maxsize=1)
+def get_expense_categories_from_sheet():
+    """Загружает список категорий расходов из Google Таблицы с кешированием"""
+    try:
+        logger.info("🔄 Загружаю список категорий расходов из Google Таблицы...")
+        sheet = get_google_sheet_cached()
+
+        try:
+            categories_sheet = sheet.spreadsheet.worksheet(EXPENSE_CATEGORIES_SHEET_NAME)
+            logger.info("✅ Лист 'Категории расходов' найден")
+        except Exception as e:
+            logger.error(f"❌ Лист 'Категории расходов' не найден: {e}")
+            return []
+
+        all_data = categories_sheet.get_all_values()
+        logger.info(f"📊 Получено строк с листа 'Категории расходов': {len(all_data)}")
+
+        # Пропускаем заголовок
+        categories_data = all_data[1:] if len(all_data) > 1 else []
+
+        # Формируем список категорий
+        categories_list = []
+        for row in categories_data:
+            if len(row) >= 2 and row[1]:  # Берем значение из колонки "Категория"
+                categories_list.append(row[1].strip())
+
+        logger.info(f"✅ Загружено {len(categories_list)} категорий расходов: {categories_list}")
+        return categories_list
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка загрузки категорий расходов: {e}")
+        return []   
 
 
 # ==================== КЛАВИАТУРЫ ====================
@@ -927,6 +962,31 @@ def report_types_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def expense_categories_keyboard():
+    """Клавиатура с категориями расходов"""
+    try:
+        categories = get_expense_categories_from_sheet()
+        keyboard = []
+
+        # Создаем кнопки (по 2 в ряд)
+        for i in range(0, len(categories), 2):
+            row = []
+            row.append(InlineKeyboardButton(categories[i], callback_data=f"expense_cat_{categories[i]}"))
+            
+            if i + 1 < len(categories):
+                row.append(InlineKeyboardButton(categories[i + 1], callback_data=f"expense_cat_{categories[i + 1]}"))
+            
+            keyboard.append(row)
+
+        # Добавляем кнопку "Отмена"
+        keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
+
+        return InlineKeyboardMarkup(keyboard)
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания клавиатуры категорий расходов: {e}")
+        return InlineKeyboardMarkup(
+            [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+        )
 
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -969,6 +1029,19 @@ async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=report_types_keyboard(),
     )
 
+async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /addexpense для добавления расхода"""
+    user_id = update.message.from_user.id
+    
+    # Очищаем предыдущее состояние расходов
+    if 'expense_data' in context.user_data:
+        del context.user_data['expense_data']
+    
+    # Запрашиваем категорию расхода
+    await update.message.reply_text(
+        "📋 Выберите категорию расхода:",
+        reply_markup=expense_categories_keyboard(),
+    )
 
 # ==================== ОБРАБОТЧИКИ КНОПОК ====================
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1006,6 +1079,19 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         sales_data = get_sales_data()
         report = generate_product_report(sales_data)
         await query.edit_message_text(report, parse_mode="Markdown")
+        return
+    
+    # Обработка выбора категории расхода
+    if callback_data.startswith("expense_cat_"):
+        category = callback_data.replace("expense_cat_", "")
+        
+        # Сохраняем категорию в контексте
+        context.user_data['expense_data'] = {'category': category}
+        
+        await query.edit_message_text(
+            f"📋 Категория: {category}\n\n"
+            f"💵 Введите сумму расхода (например: 1500.50):"
+        )
         return
 
     # Получаем текущее состояние пользователя из БД
@@ -1501,6 +1587,115 @@ async def handle_message_input(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await handle_quantity(update, context)
 
+async def handle_expense_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ввода суммы расхода"""
+    user_id = update.message.from_user.id
+
+    try:
+        amount = float(update.message.text.strip().replace(",", "."))
+        if amount <= 0:
+            await update.message.reply_text(
+                "❌ Сумма должна быть положительным числом. Попробуйте снова:"
+            )
+            return
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Пожалуйста, введите число (например: 1500.50). Попробуйте снова:"
+        )
+        return
+
+    # Сохраняем сумму в контексте
+    if 'expense_data' not in context.user_data:
+        context.user_data['expense_data'] = {}
+    
+    context.user_data['expense_data']['amount'] = amount
+    
+    await update.message.reply_text(
+        f"💵 Сумма: {amount:,.2f} руб.\n\n"
+        f"📝 Введите комментарий к расходу (или нажмите /skip чтобы пропустить):"
+    )
+
+async def handle_expense_comment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ввода комментария к расходу"""
+    user_id = update.message.from_user.id
+    comment = update.message.text.strip()
+
+    # Сохраняем комментарий
+    context.user_data['expense_data']['comment'] = comment
+    
+    # Записываем расход в таблицу
+    await save_expense_to_sheet(update, context)
+
+async def save_expense_to_sheet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохраняет расход в Google Таблицу"""
+    user_id = update.message.from_user.id
+    expense_data = context.user_data.get('expense_data', {})
+    
+    if not expense_data:
+        await update.message.reply_text("❌ Ошибка: данные расхода не найдены")
+        return
+
+    # Формируем данные для записи
+    record_data = [
+        expense_data.get('category', ''),  # Категория расходов
+        expense_data.get('amount', 0),     # Сумма
+        datetime.now().strftime("%d.%m.%Y"),  # Дата
+        expense_data.get('comment', '')    # Комментарий
+    ]
+
+    # Записываем в Google Таблицу
+    try:
+        sheet = get_google_sheet_cached()
+        expenses_sheet = sheet.spreadsheet.worksheet(EXPENSES_SHEET_NAME)
+        expenses_sheet.append_row(record_data)
+        
+        logger.info(f"✅ Расход добавлен в Google Таблицу: {record_data}")
+        
+        # Формируем сообщение об успехе
+        success_message = (
+            f"✅ *Расход добавлен!*\n\n"
+            f"• Категория: {expense_data['category']}\n"
+            f"• Сумма: {expense_data['amount']:,.2f} руб.\n"
+            f"• Дата: {datetime.now().strftime('%d.%m.%Y')}\n"
+        )
+        
+        if expense_data.get('comment'):
+            success_message += f"• Комментарий: {expense_data['comment']}"
+        
+        await update.message.reply_text(success_message, parse_mode="Markdown")
+        
+        # Очищаем данные
+        del context.user_data['expense_data']
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка записи расхода в Google Таблицу: {e}")
+        await update.message.reply_text("❌ Ошибка записи данных. Попробуйте снова.")
+        
+async def skip_expense_comment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик пропуска комментария к расходу"""
+    # Устанавливаем пустой комментарий
+    if 'expense_data' not in context.user_data:
+        context.user_data['expense_data'] = {}
+    
+    context.user_data['expense_data']['comment'] = ''
+    
+    # Записываем расход
+    await save_expense_to_sheet(update, context)
+
+async def handle_message_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Роутер для обработки текстовых сообщений"""
+    if context.user_data.get("manual_price_input"):
+        await handle_manual_price(update, context)
+    elif 'expense_data' in context.user_data:
+        # Определяем этап ввода расхода
+        expense_data = context.user_data.get('expense_data', {})
+        
+        if 'amount' not in expense_data:
+            await handle_expense_amount(update, context)
+        else:
+            await handle_expense_comment(update, context)
+    else:
+        await handle_quantity(update, context)    
 
 # ==================== ОБРАБОТЧИК КОМАНДЫ ДЛЯ ОЧИСТКИ КЭША ====================
 
@@ -1536,8 +1731,10 @@ def main():
     # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("add", add_entry))
+    application.add_handler(CommandHandler("addexpense", add_expense))
     application.add_handler(CommandHandler("report", generate_report))
     application.add_handler(CommandHandler("clearcache", clear_cache))
+    application.add_handler(CommandHandler("skip", skip_expense_comment))
 
     # Добавляем обработчики callback запросов
     application.add_handler(CallbackQueryHandler(handle_callback_query))
