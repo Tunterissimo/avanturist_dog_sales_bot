@@ -1607,20 +1607,9 @@ async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         datetime.now().strftime("%d.%m.%Y"),  # Дата
     ]
 
-    logger.info(f"🔍 ДАННЫЕ ДЛЯ ЗАПИСИ:")
-    logger.info(f"   • Цена из контекста: {price}")
-    logger.info(f"   • Тип цены: {type(price)}")
-    logger.info(f"   • Данные пользователя: {user_data}")
-    logger.info(f"   • Ручная цена: {context.user_data.get('manual_price')}")
-    logger.info(f"   • Авто цена: {context.user_data.get('price')}")
-    logger.info(f"   • Manual price input: {context.user_data.get('manual_price_input')}")
-
     # Записываем в Google Таблицу
     try:
         sheet = get_google_sheet_cached()
-        logger.info(f"📋 ПОЛНЫЙ НАБОР ДАННЫХ ДЛЯ ЗАПИСИ:")
-        for i, value in enumerate(record_data):
-            logger.info(f"   Колонка {i}: {value} (тип: {type(value)})")
         sheet.append_row(record_data)
         logger.info(f"✅ Запись добавлена в Google Таблицу: {record_data}")
     except Exception as e:
