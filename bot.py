@@ -416,11 +416,6 @@ def get_product_price_from_catalog(
             catalog_color = normalize(row[7]) if len(row) > 7 else ""
             catalog_price = row[8].strip() if len(row) > 8 else ""
 
-            # Логируем для отладки
-            logger.info(
-                f"📋 Сравниваем с каталогом: '{catalog_product_type}', '{catalog_width}', '{catalog_size}', '{catalog_length}', '{catalog_color_type}', '{catalog_color}'"
-            )
-
             # Проверяем соответствие всех параметров
             type_match = catalog_product_type == norm_product_type
             width_match = (not norm_width) or (catalog_width == norm_width)
@@ -428,10 +423,6 @@ def get_product_price_from_catalog(
             length_match = (not norm_length) or (catalog_length == norm_length)
             color_type_match = catalog_color_type == norm_color_type
             color_match = catalog_color == norm_color
-
-            logger.info(
-                f"   Совпадения: Тип={type_match}, Ширина={width_match}, Размер={size_match}, Длина={length_match}, ТипРасцветки={color_type_match}, Расцветка={color_match}"
-            )
 
             if (
                 type_match
